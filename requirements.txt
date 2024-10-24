@@ -1,0 +1,11 @@
+easydict==1.9
+networkx==2.5.1
+numpy==1.24.4
+pyqtgraph==0.12.2
+pytransform3d==1.9.1
+PyOpenGL==3.1.7
+PyQt5==5.15.10
+PyYAML==6.0
+scipy==1.10.0
+torch==2.1.1
+torchvision==0.16.1
