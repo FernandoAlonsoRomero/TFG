@@ -40,22 +40,31 @@ import argparse
 
 parser = argparse.ArgumentParser(description='3D skeleton prediction training for 3D multi-human pose estimation')
 
-parser.add_argument('--trainset', type=str, nargs='+', required=True, help='List of json files composing the training set')
-parser.add_argument('--devset', type=str, nargs='+', required=True, help='List of json files composing the development set')
+parser.add_argument('--trainset', type=str, nargs='+', required=False, help='List of json files composing the training set')
+parser.add_argument('--devset', type=str, nargs='+', required=False, help='List of json files composing the development set')
 
 args = parser.parse_args()
 
 
-print(torch.cuda.is_available())
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-    print('Using CUDA')
-else:
-    device = torch.device('cpu')
-    print('Using CPU')
+#print(torch.cuda.is_available())
+#if torch.cuda.is_available():
+#    device = torch.device('cuda')
+#    print('Using CUDA')
+#else:
+device = torch.device('cpu')
+print('Using CPU')
 
-TRAIN_FILES = args.trainset
-DEV_FILES = args.devset
+#TRAIN_FILES = args.trainset
+#DEV_FILES = args.devset
+
+TRAIN_FILES = [
+    #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/train_set.json"
+    "/home/fernando/Desktop/TFG/data/prueba/train.json"
+]
+DEV_FILES = [
+    #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/dev_set.json"
+    "/home/fernando/Desktop/TFG/data/prueba/val.json"
+]
 
 print(f'Using {TRAIN_FILES} for training')
 print(f'Using {DEV_FILES} for dev')
@@ -190,8 +199,8 @@ if __name__ == '__main__':
     else:
         data_device = device
 
-    train_dataset = PoseEstimatorDataset(TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
-    valid_dataset = PoseEstimatorDataset(DEV_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
+    train_dataset = PoseEstimatorDataset(5, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
+    valid_dataset = PoseEstimatorDataset(5, DEV_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, shuffle=True)
     print(f'dataset length: {len(train_dataset)}')
@@ -234,6 +243,8 @@ if __name__ == '__main__':
             #
             outputs = transformer(raw_inputs.to(device))
 
+            print(outputs.shape)
+
             #
             # Compute back projections and add up the error
             #
@@ -247,9 +258,6 @@ if __name__ == '__main__':
             # Perform backward pass
             loss.backward()
             # Clip the gradients to avoid NaNs
-            ###########################################
-            # aaaaaa
-            ###########################################
             torch.nn.utils.clip_grad_norm(parameters=transformer.parameters(), max_norm=10.0, norm_type=2.0)
             # Perform optimization
             optimizer.step()
