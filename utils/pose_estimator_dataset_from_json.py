@@ -107,7 +107,7 @@ image_width = parameters.image_width
 image_height = parameters.image_height
 
 class PoseEstimatorDataset(Dataset):
-    def __init__(self, input_data, cameras, joint_list, transform=None, data_augmentation=False, reload=False, save=False, device=None):
+    def __init__(self, sequence_length, input_data, cameras, joint_list, transform=None, data_augmentation=False, reload=False, save=False, device=None):
         """
             input_data
                -> list[str]: List containing paths to the JSON files.
@@ -121,6 +121,7 @@ class PoseEstimatorDataset(Dataset):
         self.data_augmentation = data_augmentation
         self.numbers_per_joint = numbers_per_joint
         self.numbers_per_joint_for_loss = numbers_per_joint_for_loss
+        self.sequence_length = sequence_length
 
 
         camera_section_length_total = len(parameters.joint_list)*numbers_per_joint_for_loss  # L joints/skeleton, X numbers/joint.
@@ -208,6 +209,7 @@ class PoseEstimatorDataset(Dataset):
                                 network_input[used_c_offset + used_j_offset + 4: used_c_offset + used_j_offset + 7] = cam_from_root[0:3] / 10.
                                 network_input[used_c_offset + used_j_offset + 7: used_c_offset + used_j_offset + 10] = pix_ray_from_root[0:3] / 10.
 
+
                     if view_from_robot:
                         for c_index in range(len(parameters.used_cameras)):  # Include 3D from triangulation
                             used_c_offset = c_index * camera_section_length_input
@@ -227,6 +229,17 @@ class PoseEstimatorDataset(Dataset):
                             total += 1
                             self.data.append(network_input_DA)
                             self.orig_data.append(error_input)
+
+                            #current_sequence_data.append(network_input_DA)
+                            #current_sequence_error.append(error_input)
+
+                            #if len(current_sequence_data) == self.sequence_length:
+                            #    total += 1
+                            #    self.data.append(torch.stack(current_sequence_data))
+                            #    self.data.append(torch.stack(current_sequence_error))
+
+                            #    current_sequence_data.pop(0)
+                            #    current_sequence_error.pop(0)
 
                         n_loaded += 1      
                   
@@ -290,12 +303,35 @@ class PoseEstimatorDataset(Dataset):
         else:
             raise Exception(f'Invalid dataset input {type(input_data)} for json_files. Only list and dict are allowed.')
 
+        sequences_data = []
+        sequences_orig = []
+
+        current_seq_data = []
+        current_seq_orig = []
+
+        for data_index, element in enumerate(self.data):
+            current_seq_data.append(element)
+            current_seq_orig.append(self.orig_data[data_index])
+
+            if len(current_seq_data) == sequence_length:
+                sequences_data.append(torch.stack(current_seq_data))
+                sequences_orig.append(torch.stack(current_seq_orig))
+
+                current_seq_data.pop(0)
+                current_seq_orig.pop(0)
+
+
         if device is None:
-            self.data = torch.stack(self.data)
-            self.orig_data = torch.stack(self.orig_data)
+            #self.data = torch.stack(self.data)
+            #self.orig_data = torch.stack(self.orig_data)
+            self.data = torch.stack(sequences_data)
+            self.orig_data = torch.stack(sequences_orig)
+
         else:
-            self.data = torch.stack(self.data).to(device=device)
-            self.orig_data = torch.stack(self.orig_data).to(device=device)
+            #self.data = torch.stack(self.data).to(device=device)
+            #self.orig_data = torch.stack(self.orig_data).to(device=device)
+            self.data = torch.stack(sequences_data).to(device=device)
+            self.orig_data = torch.stack(sequences_orig).to(device=device)
 
         if save:
              torch.save({

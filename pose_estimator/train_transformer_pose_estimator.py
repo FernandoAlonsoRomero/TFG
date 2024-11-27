@@ -3,7 +3,7 @@ from tkinter import Y
 
 epochs = 1000
 lr = 1e-4
-batch_size = 2096
+batch_size = 2
 patience = 20
 optimise_matrices = False
 
@@ -46,13 +46,13 @@ parser.add_argument('--devset', type=str, nargs='+', required=False, help='List 
 args = parser.parse_args()
 
 
-#print(torch.cuda.is_available())
-#if torch.cuda.is_available():
-#    device = torch.device('cuda')
-#    print('Using CUDA')
-#else:
-device = torch.device('cpu')
-print('Using CPU')
+print(torch.cuda.is_available())
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    print('Using CUDA')
+else:
+    device = torch.device('cpu')
+    print('Using CPU')
 
 #TRAIN_FILES = args.trainset
 #DEV_FILES = args.devset
@@ -76,15 +76,19 @@ numbers_per_joint = parameters.numbers_per_joint
 number_of_cameras = len(parameters.used_cameras)
 print(f'number of cameras {number_of_cameras}')
 
-def compute_error(parameters, joints, raw_inputs, orig_inputs, outputs, batch_size, camera_d_transforms, camera_matrices, distortion_coefficients):
-    ones = torch.ones(1, batch_size, device=device)  # useful to convert to homogeneous coordinates
-    error2D = torch.zeros(batch_size, device=device)  # we'll add up the 2D error for the batch in this variable
+def compute_error(sequence, parameters, joints, raw_inputs, orig_inputs, outputs, batch_size, camera_d_transforms, camera_matrices, distortion_coefficients):
+    
+    outputs = outputs.view(-1, 54)
+    orig_inputs = orig_inputs.view(-1, 360)
+
+    ones = torch.ones(1, sequence*batch_size, device=device)  # useful to convert to homogeneous coordinates
+    error2D = torch.zeros(batch_size*sequence, device=device)  # we'll add up the 2D error for the batch in this variable
 
     for joint_idx in range(len(joints)):
         ######################################################
         ## En vez de multiplicar la salida del mlp por 10,  ## 
         ## en este caso, la salida del transformer la tengo ##
-        ## que dividir por 100 para que concuerde.          ##
+        ## que dividir por 10 para que concuerde.           ##
         ######################################################
         results_3d = torch.cat((torch.transpose(outputs[:, joint_idx * 3:joint_idx * 3 + 3]/10., 0, 1).to(device), ones),
                                0).to(device)
@@ -243,12 +247,10 @@ if __name__ == '__main__':
             #
             outputs = transformer(raw_inputs.to(device))
 
-            print(outputs.shape)
-
             #
             # Compute back projections and add up the error
             #
-            error = compute_error(parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
+            error = compute_error(5, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                     camera_d_transforms, camera_matrices, distortion_coefficients)
 
             # Compute loss
@@ -284,7 +286,7 @@ if __name__ == '__main__':
 
                     outputs = transformer(raw_inputs.to(device))
 
-                    error = compute_error(parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
+                    error = compute_error(5, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                             camera_d_transforms, camera_matrices, distortion_coefficients)
 
                     # Compute loss

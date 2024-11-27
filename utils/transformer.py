@@ -42,12 +42,17 @@ class TransformerPoseEstimation(nn.Module):
 	def forward(self, x):
 		# Suponemos que 'x' tiene forma (batch_size, input_dim) -> (batch_size, 1260)
 		
+		batch_size, seq_len, _ = x.shape
+		x = x.view(batch_size * seq_len, -1)
+
 		# Proyección de las características iniciales a un espacio d_model
 		x = self.input_proj(x)  # (batch_size, d_model)
 		
-		# Añadir una dimensión de secuencia para que sea compatible con el transformer: (batch_size, 1, d_model)
-		x = x.unsqueeze(1)
+		## Añadir una dimensión de secuencia para que sea compatible con el transformer: (batch_size, 1, d_model)
+		#x = x.unsqueeze(1)
 		
+		x = x.view(batch_size, seq_len, -1)
+
 		# Transposición para que sea compatible con el Transformer: (1, batch_size, d_model)
 		x = x.transpose(0, 1)
 		
