@@ -6,6 +6,7 @@ lr = 1e-4
 batch_size = 2
 patience = 20
 optimise_matrices = False
+sequence_length = 10
 
 WHOLE_DATASET_IN_GPU = False
 
@@ -40,8 +41,8 @@ import argparse
 
 parser = argparse.ArgumentParser(description='3D skeleton prediction training for 3D multi-human pose estimation')
 
-parser.add_argument('--trainset', type=str, nargs='+', required=False, help='List of json files composing the training set')
-parser.add_argument('--devset', type=str, nargs='+', required=False, help='List of json files composing the development set')
+parser.add_argument('--trainset', type=str, nargs='+', required=True, help='List of json files composing the training set')
+parser.add_argument('--devset', type=str, nargs='+', required=True, help='List of json files composing the development set')
 
 args = parser.parse_args()
 
@@ -54,9 +55,10 @@ else:
     device = torch.device('cpu')
     print('Using CPU')
 
-#TRAIN_FILES = args.trainset
-#DEV_FILES = args.devset
 
+TRAIN_FILES = args.trainset
+DEV_FILES = args.devset
+'''
 TRAIN_FILES = [
     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/train_set.json"
     "/home/fernando/Desktop/TFG/data/prueba/train.json"
@@ -65,9 +67,11 @@ DEV_FILES = [
     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/dev_set.json"
     "/home/fernando/Desktop/TFG/data/prueba/val.json"
 ]
-
+'''
 print(f'Using {TRAIN_FILES} for training')
 print(f'Using {DEV_FILES} for dev')
+
+print(f'Sequence lenght: {sequence_length}')
 
 sys.path.append('../')
 from parameters import parameters 
@@ -76,17 +80,24 @@ numbers_per_joint = parameters.numbers_per_joint
 number_of_cameras = len(parameters.used_cameras)
 print(f'number of cameras {number_of_cameras}')
 
-def compute_error(sequence, parameters, joints, raw_inputs, orig_inputs, outputs, batch_size, camera_d_transforms, camera_matrices, distortion_coefficients):
+def compute_error(seq_length, parameters, joints, raw_inputs, orig_inputs, outputs, batch_size, camera_d_transforms, camera_matrices, distortion_coefficients):
     
-    outputs = outputs.view(-1, 54)
-    orig_inputs = orig_inputs.view(-1, 360)
+    ######################################################
+    ## Aplano la salida de la red y el input original   ##
+    ## para facilitar el calculo del error              ##
+    ######################################################
+    outputs = outputs.view(-1, outputs.shape[-1])
+    orig_inputs = orig_inputs.view(-1, orig_inputs.shape[-1])
 
-    ones = torch.ones(1, sequence*batch_size, device=device)  # useful to convert to homogeneous coordinates
-    error2D = torch.zeros(batch_size*sequence, device=device)  # we'll add up the 2D error for the batch in this variable
+    ######################################################
+    ## Añado el mismo shape al error                    ##
+    ######################################################
+    ones = torch.ones(1, batch_size*seq_length, device=device)  # useful to convert to homogeneous coordinates
+    error2D = torch.zeros(batch_size*seq_length, device=device)  # we'll add up the 2D error for the batch in this variable
 
     for joint_idx in range(len(joints)):
         ######################################################
-        ## En vez de multiplicar la salida del mlp por 10,  ## 
+        ## En vez de multiplicar la salida del mlp por 10,  ##
         ## en este caso, la salida del transformer la tengo ##
         ## que dividir por 10 para que concuerde.           ##
         ######################################################
@@ -203,8 +214,11 @@ if __name__ == '__main__':
     else:
         data_device = device
 
-    train_dataset = PoseEstimatorDataset(5, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
-    valid_dataset = PoseEstimatorDataset(5, DEV_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
+    ##############################################################
+    ## Añadimos el tamaño de la sequencia, en este caso 5       ##
+    ##############################################################
+    train_dataset = PoseEstimatorDataset(sequence_length, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
+    valid_dataset = PoseEstimatorDataset(sequence_length, DEV_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, shuffle=True)
     print(f'dataset length: {len(train_dataset)}')
@@ -250,7 +264,7 @@ if __name__ == '__main__':
             #
             # Compute back projections and add up the error
             #
-            error = compute_error(5, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
+            error = compute_error(sequence_length, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                     camera_d_transforms, camera_matrices, distortion_coefficients)
 
             # Compute loss
@@ -286,7 +300,7 @@ if __name__ == '__main__':
 
                     outputs = transformer(raw_inputs.to(device))
 
-                    error = compute_error(5, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
+                    error = compute_error(sequence_length, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                             camera_d_transforms, camera_matrices, distortion_coefficients)
 
                     # Compute loss
