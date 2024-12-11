@@ -66,7 +66,6 @@ class ParseObjects(object):
         self.max_num_objects = max_num_objects
     
     def __call__(self, cmap):
-        
         peak_counts, peaks = trt_pose.plugins.find_peaks(cmap, self.cmap_threshold, self.cmap_window, self.max_num_parts)
         normalized_peaks = trt_pose.plugins.refine_peaks(peak_counts, peaks, cmap, self.cmap_window)
         return normalized_peaks
@@ -170,6 +169,7 @@ for c in cam_directories:
             images_info[img_id]['json'] = os.path.join(hd_skel_json_path, 'body3DScene_'+img_id+'.json')
         images_info[img_id]['cameras'][cam_id] = os.path.join(imgs_path, img_name)
 
+np.set_printoptions(threshold=sys.maxsize)
 human_json = dict()
 cont = 0
 model = load_panoptic_model()
@@ -178,9 +178,15 @@ for image in images_info.values():
         continue
 
     cont += 1
+    if cont%100==0:
+        print("Processing image", cont)
 
-    with open(image['json']) as dfile:
-        bframe = json.load(dfile)
+    try:
+        with open(image['json']) as dfile:
+            bframe = json.load(dfile)
+    except:
+        print("Error processing json file", image['json'])
+        continue
 
     kps_per_human_and_cam = dict()
 
@@ -193,7 +199,6 @@ for image in images_info.values():
         panoptic_output = get_output_from_panoptic_model(color_image, model)
 
         peaks = parse_objects(panoptic_output)
-
 
         # Projection from 3D
         joints_3D = dict()
@@ -289,7 +294,7 @@ for image in images_info.values():
 
         if draw:
             cv2.imshow("test", cv2.resize(ret, dsize=None, fx=1, fy=1))
-            if cv2.waitKey(1) % 256 == 27:
+            if cv2.waitKey(0) % 256 == 27:
                 print("Escape hit, closing...")
                 cv2.destroyAllWindows()
                 sys.exit(0)
@@ -301,9 +306,15 @@ for image in images_info.values():
         human_json[id_person].append(dict(kps_per_human_and_cam[id_person]))
 
 final_json = []
-for p, j in human_json.items():
-    final_json += j
 
-output_file = open(seq_name.split('/')[-1] + '_from_image_single.json', 'w')
-output_file.write(json.dumps(final_json))
-output_file.close()
+for p, j in human_json.items():
+    print(p, len(j))
+    output_file = open(seq_name.split('/')[-1] + '_from_image_single_' + str(p) + '.json', 'w')
+    output_file.write(json.dumps(j))
+    output_file.close()
+
+    # final_json += j
+
+# output_file = open(seq_name.split('/')[-1] + '_from_image_single.json', 'w')
+# output_file.write(json.dumps(final_json))
+# output_file.close()

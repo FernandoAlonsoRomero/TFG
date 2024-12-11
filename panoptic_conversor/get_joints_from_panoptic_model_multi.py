@@ -79,7 +79,7 @@ num_parts = len(human_pose['keypoints'])
 num_links = len(human_pose['skeleton'])
 parse_objects = ParseObjects(topology, cmap_threshold=0.15, link_threshold=0.15)
 
-draw = False
+draw = True
 
 # Setup paths
 seq_name = sys.argv[1]
@@ -235,11 +235,11 @@ for image in images_info.values():
                 y = joint[1]
                 kps[int(kp)] = [int(kp), float(x), float(y), 1, 1]
                 if draw:
-                    for idx, joint in data.items():
-                        x = joint[1]
-                        y = joint[2]
-                        cv2.circle(ret, (int(x), int(y)), 1, (0, 0, 255), 2)
-                        cv2.putText(ret, "%d" % int(kp), (int(x) + 5, int(y)),  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 1)
+                    # for idx, joint in data.items():
+                    #     x = joint[1]
+                    #     y = joint[2]
+                    cv2.circle(ret, (int(x), int(y)), 1, (0, 0, 255), 2)
+                    cv2.putText(ret, "%d" % int(kp), (int(x) + 5, int(y)),  cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 1)
             projected_people[id_person] = copy.deepcopy(kps)
 
         # Organize detected joints into separate skeletons according to the their proximity to projected people
@@ -262,7 +262,6 @@ for image in images_info.values():
                     cv2.circle(ret, (int(x), int(y)), 1, (0, 255, 0), 2)
                     if j!=2:
                         cv2.putText(ret, "%d" % int(idx), (int(x) + 5, int(y)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 1)
-
         detected_people = dict()
         for id_person, skeleton in projected_people.items():
             kps = dict()
