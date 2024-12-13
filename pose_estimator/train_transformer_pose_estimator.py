@@ -3,10 +3,10 @@ from tkinter import Y
 
 epochs = 1000
 lr = 1e-4
-batch_size = 2
+batch_size = 1048
 patience = 20
 optimise_matrices = False
-sequence_length = 10
+sequence_length = 100
 
 WHOLE_DATASET_IN_GPU = False
 
@@ -41,8 +41,8 @@ import argparse
 
 parser = argparse.ArgumentParser(description='3D skeleton prediction training for 3D multi-human pose estimation')
 
-parser.add_argument('--trainset', type=str, nargs='+', required=True, help='List of json files composing the training set')
-parser.add_argument('--devset', type=str, nargs='+', required=True, help='List of json files composing the development set')
+parser.add_argument('--trainset', type=str, nargs='+', required=False, help='List of json files composing the training set')
+parser.add_argument('--devset', type=str, nargs='+', required=False, help='List of json files composing the development set')
 
 args = parser.parse_args()
 
@@ -55,7 +55,7 @@ else:
     device = torch.device('cpu')
     print('Using CPU')
 
-
+'''
 TRAIN_FILES = args.trainset
 DEV_FILES = args.devset
 '''
@@ -67,7 +67,7 @@ DEV_FILES = [
     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/dev_set.json"
     "/home/fernando/Desktop/TFG/data/prueba/val.json"
 ]
-'''
+
 print(f'Using {TRAIN_FILES} for training')
 print(f'Using {DEV_FILES} for dev')
 

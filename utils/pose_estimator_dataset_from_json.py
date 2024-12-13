@@ -317,8 +317,9 @@ class PoseEstimatorDataset(Dataset):
                 sequences_data.append(torch.stack(current_seq_data))
                 sequences_orig.append(torch.stack(current_seq_orig))
 
-                current_seq_data.pop(0)
-                current_seq_orig.pop(0)
+                for _ in range(int(round((sequence_length/35), 0))):
+                    current_seq_data.pop(0)
+                    current_seq_orig.pop(0)
 
 
         if device is None:
