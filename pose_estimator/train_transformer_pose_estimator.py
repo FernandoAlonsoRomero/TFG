@@ -1,7 +1,7 @@
 import time
 from tkinter import Y
 
-epochs = 1000
+epochs = 100000
 lr = 1e-4
 batch_size = 1048
 patience = 20
@@ -25,7 +25,7 @@ from torch.utils import data
 
 sys.path.append('../utils')
 from pose_estimator_utils import camera_matrix, get_distortion_coefficients, from_homogeneous, from_homogeneous2, apply_distortion
-from pose_estimator_dataset_from_json import PoseEstimatorDataset
+from pose_estimator_dataset_from_json import PoseEstimatorDataset, PersonBatchSampler
 from mlp import PoseEstimatorMLP
 from transformer import TransformerPoseEstimation
 from json_services import write_json
@@ -55,18 +55,18 @@ else:
     device = torch.device('cpu')
     print('Using CPU')
 
-'''
+
 TRAIN_FILES = args.trainset
 DEV_FILES = args.devset
-'''
-TRAIN_FILES = [
-    #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/train_set.json"
-    "/home/fernando/Desktop/TFG/data/prueba/train.json"
-]
-DEV_FILES = [
-    #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/dev_set.json"
-    "/home/fernando/Desktop/TFG/data/prueba/val.json"
-]
+
+# TRAIN_FILES = [
+#     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/train_set.json"
+#     "/home/fernando/Desktop/TFG/data/prueba/train.json"
+# ]
+# DEV_FILES = [
+#     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/dev_set.json"
+#     "/home/fernando/Desktop/TFG/data/prueba/val.json"
+# ]
 
 print(f'Using {TRAIN_FILES} for training')
 print(f'Using {DEV_FILES} for dev')
@@ -217,10 +217,12 @@ if __name__ == '__main__':
     ##############################################################
     ## Añadimos el tamaño de la sequencia, en este caso 5       ##
     ##############################################################
-    train_dataset = PoseEstimatorDataset(sequence_length, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
-    valid_dataset = PoseEstimatorDataset(sequence_length, DEV_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, shuffle=True)
+    train_dataset = PoseEstimatorDataset(sequence_length, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=False, reload=True, save=True)
+    valid_dataset = PoseEstimatorDataset(sequence_length, DEV_FILES, parameters.cameras, joint_list, data_augmentation=False, reload=True, save=True)
+    train_sampler = PersonBatchSampler(train_dataset.person_indices, batch_size)
+    valid_sampler = PersonBatchSampler(valid_dataset.person_indices, batch_size)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_sampler = train_sampler)
+    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_sampler = valid_sampler)
     print(f'dataset length: {len(train_dataset)}')
 
     # Define loss function and optimizer

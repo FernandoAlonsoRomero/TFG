@@ -9,6 +9,7 @@ numbers_per_joint_for_loss = parameters.numbers_per_joint_for_loss
 
 import torch
 from torch.utils.data import Dataset
+from torch.utils.data.sampler import Sampler
 import random
 import copy
 import json
@@ -131,6 +132,12 @@ class PoseEstimatorDataset(Dataset):
 
         self.data = []
         self.orig_data = []
+        self.person_indices = {}
+
+        sequences_data = []
+        sequences_orig = []
+
+
 
         if reload is True:
             reload_fname = f'{input_data[-1]}.pytorch'
@@ -138,6 +145,7 @@ class PoseEstimatorDataset(Dataset):
                 loaded = torch.load(reload_fname)
                 self.data = loaded['data']
                 self.orig_data = loaded['orig_data']
+                self.person_indices = loaded['person_indices']
                 return
 
         ignored_names = []
@@ -146,9 +154,12 @@ class PoseEstimatorDataset(Dataset):
         total = 0
         if type(input_data) is list:
             json_files = input_data
+            person_id = 0
+            i_sample = 0
 
             for f in json_files:  # FOR EACH INPUT FILE
                 print(f)
+                self.person_indices[person_id] = []
                 json_data = json.loads(open(f, "rb").read())
                 n_loaded = 0
                 n_data = len(json_data)
@@ -246,6 +257,28 @@ class PoseEstimatorDataset(Dataset):
                         if n_loaded % 1000 == 0:
                             print('Loaded', n_loaded, 'of', n_data)
 
+
+                current_seq_data = []
+                current_seq_orig = []
+
+                for data_index, element in enumerate(self.data):
+                    current_seq_data.append(element)
+                    current_seq_orig.append(self.orig_data[data_index])
+
+                    if len(current_seq_data) == sequence_length:
+                        sequences_data.append(torch.stack(current_seq_data))
+                        sequences_orig.append(torch.stack(current_seq_orig))
+                        self.person_indices[person_id].append(i_sample)
+                        i_sample += 1
+
+                        for _ in range(int(round((sequence_length/35), 0))):
+                            current_seq_data.pop(0)
+                            current_seq_orig.pop(0)
+
+                self.data = []
+                self.orig_data = []
+                person_id += 1
+
             print(f'Given {given}\nTotal {total}')
         elif type(input_data) is dict:
             skeleton_indices = get_skeleton_indices(input_data)
@@ -303,23 +336,23 @@ class PoseEstimatorDataset(Dataset):
         else:
             raise Exception(f'Invalid dataset input {type(input_data)} for json_files. Only list and dict are allowed.')
 
-        sequences_data = []
-        sequences_orig = []
+        # sequences_data = []
+        # sequences_orig = []
 
-        current_seq_data = []
-        current_seq_orig = []
+        # current_seq_data = []
+        # current_seq_orig = []
 
-        for data_index, element in enumerate(self.data):
-            current_seq_data.append(element)
-            current_seq_orig.append(self.orig_data[data_index])
+        # for data_index, element in enumerate(self.data):
+        #     current_seq_data.append(element)
+        #     current_seq_orig.append(self.orig_data[data_index])
 
-            if len(current_seq_data) == sequence_length:
-                sequences_data.append(torch.stack(current_seq_data))
-                sequences_orig.append(torch.stack(current_seq_orig))
+        #     if len(current_seq_data) == sequence_length:
+        #         sequences_data.append(torch.stack(current_seq_data))
+        #         sequences_orig.append(torch.stack(current_seq_orig))
 
-                for _ in range(int(round((sequence_length/35), 0))):
-                    current_seq_data.pop(0)
-                    current_seq_orig.pop(0)
+        #         for _ in range(int(round((sequence_length/35), 0))):
+        #             current_seq_data.pop(0)
+        #             current_seq_orig.pop(0)
 
 
         if device is None:
@@ -337,7 +370,8 @@ class PoseEstimatorDataset(Dataset):
         if save:
              torch.save({
                 'data': self.data,
-                'orig_data': self.orig_data
+                'orig_data': self.orig_data,
+                'person_indices': self.person_indices
                 }, f'{input_data[-1]}.pytorch')
 
     def __len__(self):
@@ -351,3 +385,38 @@ class PoseEstimatorDataset(Dataset):
             ret1 = self.transform(ret1)
 
         return ret1, ret2
+
+
+
+class PersonBatchSampler(Sampler):
+    # Yield a mini-batch of indices of the same person. 
+
+
+    def __init__(self, person_indices, batch_size):
+        # build data for sampling here
+        self.batch_size = batch_size
+        self.person_indices = person_indices
+        self.data_len = 0
+        for p in self.person_indices:
+            self.data_len += len(self.person_indices[p])
+        
+        
+    def __iter__(self):
+        # implement logic of sampling here
+        indices = copy.deepcopy(self.person_indices)
+        persons = list(indices.keys())
+        for p in persons:
+            random.shuffle(indices[p])
+        while len(persons)>0:
+            id = random.randint(0, len(persons)-1)
+            person = persons[id]
+            batch = []
+            while len(batch) < self.batch_size and len(indices[person])>0:
+                batch.append(indices[person].pop(0))
+            # print("person", person, "batch size", len(batch))
+            if len(indices[person])==0:
+                persons.pop(id)
+            yield batch
+
+    def __len__(self):
+        return len(self.data_len)
