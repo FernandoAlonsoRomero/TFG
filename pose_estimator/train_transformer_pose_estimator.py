@@ -3,10 +3,11 @@ from tkinter import Y
 
 epochs = 100000
 lr = 1e-4
-batch_size = 1048
+batch_size = 128 #1048
 patience = 20
 optimise_matrices = False
 sequence_length = 100
+data_augmentation = True
 
 WHOLE_DATASET_IN_GPU = False
 
@@ -17,6 +18,7 @@ import cv2
 import os
 
 import numpy as np
+import json
 
 from torch import nn
 from torch._C import dtype
@@ -59,14 +61,12 @@ else:
 TRAIN_FILES = args.trainset
 DEV_FILES = args.devset
 
-# TRAIN_FILES = [
-#     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/train_set.json"
-#     "/home/fernando/Desktop/TFG/data/prueba/train.json"
-# ]
-# DEV_FILES = [
-#     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/dev_set.json"
-#     "/home/fernando/Desktop/TFG/data/prueba/val.json"
-# ]
+#TRAIN_FILES = [
+#    r"c:\Users\falonso\Documents\TFG\instances_dataset\training\160224_haggling1_from_image_single_0.json"
+#]
+#DEV_FILES = [
+#    r"c:\Users\falonso\Documents\TFG\instances_dataset\dev_test\160422_haggling1_from_image_single_0.json"
+#]
 
 print(f'Using {TRAIN_FILES} for training')
 print(f'Using {DEV_FILES} for dev')
@@ -79,6 +79,34 @@ joint_list = parameters.joint_list
 numbers_per_joint = parameters.numbers_per_joint
 number_of_cameras = len(parameters.used_cameras)
 print(f'number of cameras {number_of_cameras}')
+
+with open("../human_pose.json", 'r') as f:
+    human_pose = json.load(f)
+    skeleton = human_pose["skeleton"]
+
+
+def compute_bones_lenght_error(outputs, joints, skeleton):
+    results3D = []
+
+    for joint_idx in range(len(joints)):
+        results3D.append(outputs[:, joint_idx*3:joint_idx*3+3])
+
+    bones = []
+    for bone_idx in range(len(skeleton)):
+        j1 = skeleton[bone_idx][0]-1
+        j2 = skeleton[bone_idx][1]-1
+        bone = results3D[j1]-results3D[j2]
+        bones.append(torch.norm(bone, dim=1))
+
+
+    error = 0.0
+    for b in bones:
+        error += torch.pow(torch.std(b), 2)
+
+
+    return error
+    
+    
 
 def compute_error(seq_length, parameters, joints, raw_inputs, orig_inputs, outputs, batch_size, camera_d_transforms, camera_matrices, distortion_coefficients):
     
@@ -217,8 +245,8 @@ if __name__ == '__main__':
     ##############################################################
     ## Añadimos el tamaño de la sequencia, en este caso 5       ##
     ##############################################################
-    train_dataset = PoseEstimatorDataset(sequence_length, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=False, reload=True, save=True)
-    valid_dataset = PoseEstimatorDataset(sequence_length, DEV_FILES, parameters.cameras, joint_list, data_augmentation=False, reload=True, save=True)
+    train_dataset = PoseEstimatorDataset(sequence_length, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True)
+    valid_dataset = PoseEstimatorDataset(sequence_length, DEV_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True)
     train_sampler = PersonBatchSampler(train_dataset.person_indices, batch_size)
     valid_sampler = PersonBatchSampler(valid_dataset.person_indices, batch_size)
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_sampler = train_sampler)
@@ -242,11 +270,13 @@ if __name__ == '__main__':
     training_results = {}
 
     for epoch in range(0, epochs):
+        print("---- Epoch {} ----".format(epoch))
         if stop_training:
             break
 
         transformer.train()
         batch_loss = 0.0
+        batch_bones_loss = 0.0
 
         for mini_batch, data_inputs in enumerate(train_dataloader, 0):
 
@@ -269,9 +299,20 @@ if __name__ == '__main__':
             error = compute_error(sequence_length, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                     camera_d_transforms, camera_matrices, distortion_coefficients)
 
+            bones_error = compute_bones_lenght_error(outputs, joint_list, skeleton)*this_batch_size
+            ######################################
+            ## Escalado dinámico basado         ##
+            ## en el promedio de las magnitudes ##
+            ######################################
+            scaling_factor = error.mean().item() / (bones_error.mean().item() + 1e-8) #con el 1*e-8 evito que se divida por 0
+            normalized_bones_error = bones_error * scaling_factor
+            
             # Compute loss
             target = torch.zeros(error.size(), device=device)  # We aim for zero error
             loss = loss_function(error, target)
+            loss += normalized_bones_error
+            loss_aux = loss.clone()
+            loss_aux += bones_error # para comprobar que el afecta al error.
 
             # Perform backward pass
             loss.backward()
@@ -280,18 +321,25 @@ if __name__ == '__main__':
             # Perform optimization
             optimizer.step()
             # Set current loss
-            batch_loss += loss.item()*this_batch_size
+            batch_loss += (loss.item()-normalized_bones_error.item())*this_batch_size
+            batch_bones_loss += normalized_bones_error.item()*this_batch_size
+            #comprobación para ver que va mejor
+            batch_loss_aux += (loss_aux.item()-bones_error.item())*this_batch_size
+            batch_bones_loss_aux += bones_error.item()*this_batch_size
 
         loss_data = batch_loss / len(train_dataset)
+        bones_loss_data = batch_bones_loss / len(train_dataset)
         mae_per_coord = math.sqrt(loss_data) / len(parameters.cameras) / len(joint_list) / 2
-        print(f'loss: {loss_data:.5f} error per coor: {mae_per_coord:.5f}')
+        print(f'loss: {loss_data:.5f}, bones loss: {bones_loss_data:.5f}, error per coor: {mae_per_coord:.5f}')
 
         if loss_data < min_train_loss:
             min_train_loss = loss_data
 
         if epoch % 5 == 0:
-            print("Epoch {:05d} | MAE/coord {:.6f} | Loss: {:.6f} | Patience: {} | ".format(epoch, mae_per_coord, loss_data, cur_step), end='')
+            print("Epoch {:05d} | MAE/coord {:.6f} | Loss: {:.6f} | Bones Loss: {:.6f} | Patience: {} | ".format(epoch, mae_per_coord, loss_data, bones_loss_data, cur_step), end='')
             valid_batch_loss = 0.0
+            valid_batch_bones_loss = 0.0
+
             for batch, valid_data in enumerate(valid_dataloader):
                 with torch.no_grad():
                     raw_inputs = valid_data[0].to(device)
@@ -304,13 +352,33 @@ if __name__ == '__main__':
 
                     error = compute_error(sequence_length, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                             camera_d_transforms, camera_matrices, distortion_coefficients)
+                    bones_error = compute_bones_lenght_error(outputs, joint_list, skeleton)*this_batch_size
+                    
+                    ######################################
+                    ## Escalado dinámico basado         ##
+                    ## en el promedio de las magnitudes ##
+                    ######################################
+
+                    scaling_factor = error.mean().item() / (bones_error.mean().item() + 1e-8) #con el 1*e-8 evito que se divida por 0
+                    normalized_bones_error = bones_error * scaling_factor
 
                     # Compute loss
                     target = torch.zeros(error.size(), device=device)  # We aim for zero error
                     loss = loss_function(error, target)
-                    valid_batch_loss += loss.item() * this_batch_size
+
+                    #usamos el normalized bones error
+                    loss += normalized_bones_error
+                    valid_batch_loss += (loss.item()-normalized_bones_error.item()) * this_batch_size
+                    valid_batch_bones_loss += normalized_bones_error.item()*this_batch_size
+
+                    #comprobamos que mejora
+                    loss_aux = loss.clone()
+                    loss_aux += bones_error # para comprobar que el afecta al error.
+                    valid_batch_loss_aux += (loss_aux.item()-bones_error.item()) * this_batch_size
+                    valid_batch_bones_loss_aux += bones_error.item()*this_batch_size
 
             val_loss_data = valid_batch_loss / len(valid_dataset)
+            val_bones_loss_data = valid_batch_bones_loss / len(valid_dataset)
             val_mae_per_coord = math.sqrt(val_loss_data) / len(parameters.cameras) / len(joint_list) / 2
 
             training_results[epoch] = {
@@ -321,6 +389,7 @@ if __name__ == '__main__':
             }
 
             mean_val_loss = val_loss_data
+            print(f'val_loss: {val_loss_data:.6f} val_bones_loss: {val_bones_loss_data:.6f}')
             print(" val_MEAN: {:.6f} val_BEST: {:.6f} | val_MAE/coord {:.6f}".format(mean_val_loss, best_loss, val_mae_per_coord))
 
             # Early stop
