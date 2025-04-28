@@ -17,7 +17,7 @@ import pickle
 import numpy as np
 import cv2
 import itertools
-from data_augmentation import permutations_generator_random
+from data_augmentation import sequence_permutations_generator_random
 
 MAX_COMBINATIONS_NUMBER = 5
 
@@ -133,6 +133,7 @@ class PoseEstimatorDataset(Dataset):
         self.data = []
         self.orig_data = []
         self.person_indices = {}
+        self.available_cams = []
 
         sequences_data = []
         sequences_orig = []
@@ -229,28 +230,19 @@ class PoseEstimatorDataset(Dataset):
                                 network_input[used_c_offset + used_j_offset + 10] = 1. # 3D is available
                                 network_input[used_c_offset + used_j_offset + 11: used_c_offset + used_j_offset + 14] = torch.tensor(np.transpose(results_3D[j])[0]) / 10.
 
-                        for combination in permutations_generator_random(flags, self.data_augmentation, MAX_COMBINATIONS_NUMBER):
-                            network_input_DA = copy.deepcopy(network_input)
-                            for c_index, part in enumerate(combination):
-                                c_offset = c_index * camera_section_length_input
-                                if part == 0:
-                                    for j in parameters.joint_list:
-                                        j_offset = int(j) * numbers_per_joint
-                                        network_input_DA[c_offset + j_offset: c_offset + j_offset + 10] = 0.
-                            total += 1
-                            self.data.append(network_input_DA)
-                            self.orig_data.append(error_input)
+                        # for combination in permutations_generator_random(flags, self.data_augmentation, MAX_COMBINATIONS_NUMBER):
+                        #     network_input_DA = copy.deepcopy(network_input)
+                        #     for c_index, part in enumerate(combination):
+                        #         c_offset = c_index * camera_section_length_input
+                        #         if part == 0:
+                        #             for j in parameters.joint_list:
+                        #                 j_offset = int(j) * numbers_per_joint
+                        #                 network_input_DA[c_offset + j_offset: c_offset + j_offset + 10] = 0.
+                        total += 1
+                        self.data.append(network_input)
+                        self.orig_data.append(error_input)
+                        self.available_cams.append(flags)
 
-                            #current_sequence_data.append(network_input_DA)
-                            #current_sequence_error.append(error_input)
-
-                            #if len(current_sequence_data) == self.sequence_length:
-                            #    total += 1
-                            #    self.data.append(torch.stack(current_sequence_data))
-                            #    self.data.append(torch.stack(current_sequence_error))
-
-                            #    current_sequence_data.pop(0)
-                            #    current_sequence_error.pop(0)
 
                         n_loaded += 1      
                   
@@ -260,23 +252,35 @@ class PoseEstimatorDataset(Dataset):
 
                 current_seq_data = []
                 current_seq_orig = []
+                current_seq_cams = []
 
                 for data_index, element in enumerate(self.data):
                     current_seq_data.append(element)
                     current_seq_orig.append(self.orig_data[data_index])
+                    current_seq_cams.append(self.available_cams[data_index])
 
                     if len(current_seq_data) == sequence_length:
-                        sequences_data.append(torch.stack(current_seq_data))
-                        sequences_orig.append(torch.stack(current_seq_orig))
-                        self.person_indices[person_id].append(i_sample)
-                        i_sample += 1
-
+                        for comb_seq in sequence_permutations_generator_random(current_seq_cams, self.data_augmentation, MAX_COMBINATIONS_NUMBER):
+                            seq_DA = copy.deepcopy(current_seq_data)
+                            for i, combination in enumerate(comb_seq):
+                                for c_index, part in enumerate(combination):
+                                    c_offset = c_index * camera_section_length_input
+                                    if part == 0:
+                                        for j in parameters.joint_list:
+                                            j_offset = int(j) * numbers_per_joint
+                                            seq_DA[i][c_offset + j_offset: c_offset + j_offset + 10] = 0.
+                            sequences_data.append(torch.stack(seq_DA))
+                            sequences_orig.append(torch.stack(current_seq_orig))
+                            self.person_indices[person_id].append(i_sample)
+                            i_sample += 1
+                            
                         for _ in range(int(round((sequence_length/35), 0))):
                             current_seq_data.pop(0)
                             current_seq_orig.pop(0)
 
                 self.data = []
                 self.orig_data = []
+                self.available_cams = []
                 person_id += 1
 
             print(f'Given {given}\nTotal {total}')

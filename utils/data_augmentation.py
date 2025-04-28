@@ -46,6 +46,37 @@ def permutations_generator_random(available, data_augmentation, max_combinations
     for combination in combinations:
         yield combination
 
+def sequence_permutations_generator_random(available, data_augmentation, max_combinations_number = 1):
+    yield available
+
+    if data_augmentation is False:
+        return
+
+    seq_cams = []
+    for av in available:
+        available_np = np.array(available)
+        seq_cams.append(available_np)
+    seq_combinations = []
+    n_combinations = max_combinations_number
+    for instant in len(available):
+        combinations = []
+        for combination in itertools.product(range(2), repeat=len(available[0])):
+            combination_np = np.array(combination)
+            if (available_np-combination_np < 0).any():
+                continue
+            if (available_np-combination_np == 0).all() or (combination_np == 0).all():
+                continue
+            combinations.append(combination)
+        random.shuffle(combinations)
+        combinations = combinations[:max_combinations_number-1]
+        if len(combinations)<n_combinations:
+            n_combinations = len(combinations)
+        seq_combinations.append(combinations)
+    
+    for i in range(n_combinations):
+        comb_seq = [comb[i] for comb in seq_combinations]
+        yield comb_seq
+
 
 def add_data_to_json(json_data, min_number_of_views = 1):
     new_json_data = []
