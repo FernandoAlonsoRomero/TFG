@@ -153,7 +153,7 @@ class PoseEstimatorDataset(Dataset):
 
         given = 0
         total = 0
-        if type(input_data) is list:
+        if type(input_data) is list and type(input_data[0]) is str:
             json_files = input_data
             person_id = 0
             i_sample = 0
@@ -238,7 +238,6 @@ class PoseEstimatorDataset(Dataset):
                         #             for j in parameters.joint_list:
                         #                 j_offset = int(j) * numbers_per_joint
                         #                 network_input_DA[c_offset + j_offset: c_offset + j_offset + 10] = 0.
-                        total += 1
                         self.data.append(network_input)
                         self.orig_data.append(error_input)
                         self.available_cams.append(flags)
@@ -273,70 +272,80 @@ class PoseEstimatorDataset(Dataset):
                             sequences_orig.append(torch.stack(current_seq_orig))
                             self.person_indices[person_id].append(i_sample)
                             i_sample += 1
+                            total += 1
                             
                         for _ in range(int(round((sequence_length/35), 0))):
                             current_seq_data.pop(0)
                             current_seq_orig.pop(0)
+                            current_seq_cams.pop(0)
 
                 self.data = []
                 self.orig_data = []
                 self.available_cams = []
                 person_id += 1
+                # if n_loaded>1000:
+                #     break
 
             print(f'Given {given}\nTotal {total}')
-        elif type(input_data) is dict:
-            skeleton_indices = get_skeleton_indices(input_data)
-            results_3D = get_3D_from_triangulation(input_data, skeleton_indices)
-            output = torch.zeros([skeleton_length_input])
-            for c in input_data:
-                if c in parameters.used_cameras:
-                    c_index = parameters.camera_names.index(c)
-                    used_c_index = parameters.used_cameras.index(c)
-                    used_c_offset = used_c_index * camera_section_length_input
+        elif type(input_data) is list and type(input_data[0]) is dict:
+            current_seq_data = []
+            if len(input_data)<sequence_length:
+                current_seq_data = [torch.zeros([skeleton_length_input])]*(sequence_length-len(input_data))
+            for frame in input_data:
+                skeleton_indices = get_skeleton_indices(frame)
+                results_3D = get_3D_from_triangulation(frame, skeleton_indices)
+                output = torch.zeros([skeleton_length_input])
+                for c in frame:
+                    if c in parameters.used_cameras:
+                        c_index = parameters.camera_names.index(c)
+                        used_c_index = parameters.used_cameras.index(c)
+                        used_c_offset = used_c_index * camera_section_length_input
 
-                    cam_from_root = torch.matmul(camera_i_transforms[c_index], torch.tensor([0.0, 0.0, 0.0, 1.0])) / 10.  # world to camera transformation matrix, results_3d)                
-                    skeleton = json.loads(input_data[c][0])
-                    if not skeleton:
-                        continue
-                    skeleton = skeleton[skeleton_indices[c]]
+                        cam_from_root = torch.matmul(camera_i_transforms[c_index], torch.tensor([0.0, 0.0, 0.0, 1.0])) / 10.  # world to camera transformation matrix, results_3d)                
+                        skeleton = json.loads(frame[c][0])
+                        if not skeleton:
+                            continue
+                        skeleton = skeleton[skeleton_indices[c]]
 
-                    point_list = []
-                    for j, values in skeleton.items():
-                        if j == "ID": continue
-                        point_list.append([values[1], values[2]])
-                    if point_list:
-                        point_list = np.array(point_list)
-                        norm_factors = np.array([[image_width/2, image_height/2]]*point_list.shape[0])
-                        normalize_points = (point_list-norm_factors)/norm_factors                    
-                        undistorted_point_list = cv2.undistortPoints(point_list, camera_matrices[c], distortion_coefficients[c]).squeeze(axis=1)
-                        undistorted_pix_ray_list = torch.from_numpy(undistorted_point_list).type(torch.float32)
-                        new_col = torch.tensor([[1.0, 0.0]]*point_list.shape[0])
-                        pix_ray_from_root_list = torch.matmul(camera_i_transforms[c_index], torch.cat((undistorted_pix_ray_list, new_col), dim=1).transpose(dim0=1, dim1=0))/10. #perform only rotation
-                        pix_ray_from_root_list = pix_ray_from_root_list.transpose(dim0=1, dim1=0)
+                        point_list = []
+                        for j, values in skeleton.items():
+                            if j == "ID": continue
+                            point_list.append([values[1], values[2]])
+                        if point_list:
+                            point_list = np.array(point_list)
+                            norm_factors = np.array([[image_width/2, image_height/2]]*point_list.shape[0])
+                            normalize_points = (point_list-norm_factors)/norm_factors                    
+                            undistorted_point_list = cv2.undistortPoints(point_list, camera_matrices[c], distortion_coefficients[c]).squeeze(axis=1)
+                            undistorted_pix_ray_list = torch.from_numpy(undistorted_point_list).type(torch.float32)
+                            new_col = torch.tensor([[1.0, 0.0]]*point_list.shape[0])
+                            pix_ray_from_root_list = torch.matmul(camera_i_transforms[c_index], torch.cat((undistorted_pix_ray_list, new_col), dim=1).transpose(dim0=1, dim1=0))/10. #perform only rotation
+                            pix_ray_from_root_list = pix_ray_from_root_list.transpose(dim0=1, dim1=0)
 
-                    i_point = 0
-                    for j, values in skeleton.items():
-                        if j == "ID": continue
+                        i_point = 0
+                        for j, values in skeleton.items():
+                            if j == "ID": continue
+                            j_offset = int(j) * numbers_per_joint
+                            output[used_c_offset + j_offset] = values[3]
+                            output[used_c_offset + j_offset + 1] = normalize_points[i_point][0] #(values[1] - image_width/2) / (image_width/2) 
+                            output[used_c_offset + j_offset + 2] = normalize_points[i_point][1] #(values[2] - image_height/2) / (image_height/2)
+                            output[used_c_offset + j_offset + 3] = values[4]
+
+                            output[used_c_offset + j_offset + 4: used_c_offset + j_offset + 7] = cam_from_root[0:3]
+                            output[used_c_offset + j_offset + 7: used_c_offset + j_offset + 10] = pix_ray_from_root_list[i_point][0:3] #pix_ray_from_root[0:3] / 10.
+                            i_point += 1
+
+                for c_index in range(len(parameters.used_cameras)):  # Include 3D from triangulation
+                    used_c_offset = c_index * camera_section_length_input
+                    for j in results_3D:
                         j_offset = int(j) * numbers_per_joint
-                        output[used_c_offset + j_offset] = values[3]
-                        output[used_c_offset + j_offset + 1] = normalize_points[i_point][0] #(values[1] - image_width/2) / (image_width/2) 
-                        output[used_c_offset + j_offset + 2] = normalize_points[i_point][1] #(values[2] - image_height/2) / (image_height/2)
-                        output[used_c_offset + j_offset + 3] = values[4]
+                        output[used_c_offset + j_offset + 10] = 1. # 3D is available
+                        output[used_c_offset + j_offset + 11: used_c_offset + j_offset + 14] = torch.tensor(np.transpose(results_3D[j])[0]) / 10.
+                current_seq_data.append(output)
 
-                        output[used_c_offset + j_offset + 4: used_c_offset + j_offset + 7] = cam_from_root[0:3]
-                        output[used_c_offset + j_offset + 7: used_c_offset + j_offset + 10] = pix_ray_from_root_list[i_point][0:3] #pix_ray_from_root[0:3] / 10.
-                        i_point += 1
-
-            for c_index in range(len(parameters.used_cameras)):  # Include 3D from triangulation
-                used_c_offset = c_index * camera_section_length_input
-                for j in results_3D:
-                    j_offset = int(j) * numbers_per_joint
-                    output[used_c_offset + j_offset + 10] = 1. # 3D is available
-                    output[used_c_offset + j_offset + 11: used_c_offset + j_offset + 14] = torch.tensor(np.transpose(results_3D[j])[0]) / 10.
-
-            if torch.sum(torch.abs(output)) > 1:
-                self.data.append(output)
-            self.orig_data = self.data
+            # if torch.sum(torch.abs(current_seq_data)) > 1:
+            sequences_data.append(torch.stack(current_seq_data))
+            sequences_orig = sequences_data
+            self.person_indices = []
         else:
             raise Exception(f'Invalid dataset input {type(input_data)} for json_files. Only list and dict are allowed.')
 

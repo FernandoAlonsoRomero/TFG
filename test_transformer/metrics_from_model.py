@@ -61,7 +61,7 @@ for cam_idx, cam in enumerate(parameters.camera_names):
 
 
 CLASSIFICATION_THRESHOLD = 0.5
-
+sequence_length = 100
 
 ########################################
 
@@ -88,9 +88,15 @@ DATASTEP = args.datastep
 #######################################
 
 numbers_per_joint = parameters.numbers_per_joint
-transformer = TransformerPoseEstimation(input_dim=len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint,
-                                output_dim=54)
-saved = torch.load(MODELSDIR + 'pose_estimator.pytorch', map_location=device)
+# transformer = TransformerPoseEstimation(input_dim=len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint,
+#                                 output_dim=54)
+
+in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint
+print(f'in_dim  {in_dimensions}')
+transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
+                                    d_model=512, nhead=8, num_encoder_layers=6).to(device)
+
+saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
 transformer.load_state_dict(saved['model_state_dict'])
 transformer = transformer.to(device)
 
@@ -104,6 +110,8 @@ model = model.to(device)
 
 total_data = 0
 n_input = 0
+
+people_sequences = dict()
 
 for file in TEST_FILES:
     print(file)
@@ -241,7 +249,7 @@ for file in TEST_FILES:
             final_results = list()
             person_visible_joints = list()
             batched_input = []
-            for person in final_output:
+            for id_person, person in enumerate(final_output):
 
                 visible_joints = list()
                 if len(parameters.used_cameras)>1:
@@ -263,14 +271,18 @@ for file in TEST_FILES:
                             if values[3] > 0.5:
                                 visible_joints.append(j)
 
-
-                inputs = PoseEstimatorDataset(raw_input, parameters.cameras, parameters.joint_list, save=False)
+                if id_person not in people_sequences.keys():
+                    people_sequences[id_person] = []
+                people_sequences[id_person].append(raw_input)
+                if len(people_sequences[id_person])>sequence_length:
+                    people_sequences[id_person].pop(0)
+                inputs = PoseEstimatorDataset(sequence_length, people_sequences[id_person], parameters.cameras, parameters.joint_list, save=False)
                 if inputs.__len__()==0:
                     continue
 
                 person_visible_joints.append(visible_joints)
 
-                inputs = inputs[0][0].reshape([1, inputs[0][0].size()[0]]).to(device)
+                inputs = inputs[0][0].reshape([1, sequence_length, -1]).to(device)
 
                 batched_input.append(inputs)       
 
@@ -279,12 +291,13 @@ for file in TEST_FILES:
             if batched_input:
                 input_all = torch.cat(batched_input, dim=0)
                 output_all = transformer(input_all.to(device))
+                # print('output', output_all.shape)
                 for person_id in range(output_all.shape[0]):
                     ##########################################
                     ## La salida debe ser dividida entre 10 ##
                     ##########################################
                     results_3d = torch.squeeze(output_all[person_id])/10.
-                    results_3d = results_3d.to('cpu')
+                    results_3d = results_3d[-1].to('cpu')
 
                     x3D = results_3d[::3] 
                     y3D = results_3d[1::3]
@@ -295,6 +308,7 @@ for file in TEST_FILES:
                     for idx_joint in range(len(parameters.joint_list)):
 
                         person_result.append(np.array([x3D[idx_joint], y3D[idx_joint], z3D[idx_joint]]))
+
                     final_results.append(person_result)
 
             time_3D_i = time.time() - time_a
