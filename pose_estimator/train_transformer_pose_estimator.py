@@ -6,7 +6,8 @@ lr = 1e-4
 batch_size = 128 #1048
 patience = 20
 optimise_matrices = False
-sequence_length = 100
+sequence_length = 10
+sample_step = 10
 
 WHOLE_DATASET_IN_GPU = False
 
@@ -114,14 +115,15 @@ def compute_error(seq_length, parameters, joints, raw_inputs, orig_inputs, outpu
     ## Aplano la salida de la red y el input original   ##
     ## para facilitar el calculo del error              ##
     ######################################################
-    outputs = outputs.view(-1, outputs.shape[-1])
-    orig_inputs = orig_inputs.view(-1, orig_inputs.shape[-1])
+    # outputs = outputs.view(-1, outputs.shape[-1])
+    # orig_inputs = orig_inputs.view(-1, orig_inputs.shape[-1])
 
+    orig_inputs = orig_inputs[:,-1,:].squeeze()
     ######################################################
     ## Añado el mismo shape al error                    ##
     ######################################################
-    ones = torch.ones(1, batch_size*seq_length, device=device)  # useful to convert to homogeneous coordinates
-    error2D = torch.zeros(batch_size*seq_length, device=device)  # we'll add up the 2D error for the batch in this variable
+    ones = torch.ones(1, batch_size, device=device)  # useful to convert to homogeneous coordinates
+    error2D = torch.zeros(batch_size, device=device)  # we'll add up the 2D error for the batch in this variable
 
     for joint_idx in range(len(joints)):
         ######################################################
@@ -245,8 +247,8 @@ if __name__ == '__main__':
     ##############################################################
     ## Añadimos el tamaño de la sequencia, en este caso 5       ##
     ##############################################################
-    train_dataset = PoseEstimatorDataset(sequence_length, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=False, reload=True, save=True)
-    valid_dataset = PoseEstimatorDataset(sequence_length, DEV_FILES, parameters.cameras, joint_list, data_augmentation=False, reload=True, save=True)
+    train_dataset = PoseEstimatorDataset(sequence_length, sample_step, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
+    valid_dataset = PoseEstimatorDataset(sequence_length, sample_step, DEV_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
     train_sampler = PersonBatchSampler(train_dataset.person_indices, batch_size)
     valid_sampler = PersonBatchSampler(valid_dataset.person_indices, batch_size)
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_sampler = train_sampler)
@@ -375,6 +377,7 @@ if __name__ == '__main__':
                         'average_validation_loss': val_loss_data,
                         'average_training_error_per_coord': mae_per_coord,
                         'average_validation_error_per_coord': val_mae_per_coord,
+                        'sequence_length': sequence_length
                         }, f'../transf_pose_estimator.pytorch')
                 cur_step = 0
                 write_json(training_results, "../transf_training_results.json")

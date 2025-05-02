@@ -19,7 +19,7 @@ import cv2
 import itertools
 from data_augmentation import sequence_permutations_generator_random
 
-MAX_COMBINATIONS_NUMBER = 5
+MAX_COMBINATIONS_NUMBER = 3
 
 sys.path.append('../')
 from parameters import parameters 
@@ -108,7 +108,7 @@ image_width = parameters.image_width
 image_height = parameters.image_height
 
 class PoseEstimatorDataset(Dataset):
-    def __init__(self, sequence_length, input_data, cameras, joint_list, transform=None, data_augmentation=False, reload=False, save=False, device=None):
+    def __init__(self, sequence_length, sample_step, input_data, cameras, joint_list, transform=None, data_augmentation=False, reload=False, save=False, device=None):
         """
             input_data
                -> list[str]: List containing paths to the JSON files.
@@ -124,11 +124,12 @@ class PoseEstimatorDataset(Dataset):
         self.numbers_per_joint_for_loss = numbers_per_joint_for_loss
         self.sequence_length = sequence_length
 
+        self.sample_step = sample_step
 
-        camera_section_length_total = len(parameters.joint_list)*numbers_per_joint_for_loss  # L joints/skeleton, X numbers/joint.
-        camera_section_length_input = len(parameters.joint_list)*numbers_per_joint  # L joints/skeleton, X numbers/joint.
-        skeleton_length_total = camera_section_length_total * len(parameters.cameras)
-        skeleton_length_input = camera_section_length_input * len(parameters.used_cameras)
+        self.camera_section_length_total = len(parameters.joint_list)*numbers_per_joint_for_loss  # L joints/skeleton, X numbers/joint.
+        self.camera_section_length_input = len(parameters.joint_list)*numbers_per_joint  # L joints/skeleton, X numbers/joint.
+        skeleton_length_total = self.camera_section_length_total * len(parameters.cameras)
+        skeleton_length_input = self.camera_section_length_input * len(parameters.used_cameras)
 
         self.data = []
         self.orig_data = []
@@ -137,6 +138,7 @@ class PoseEstimatorDataset(Dataset):
 
         sequences_data = []
         sequences_orig = []
+        self.sequence_cams = []
 
 
 
@@ -147,6 +149,7 @@ class PoseEstimatorDataset(Dataset):
                 self.data = loaded['data']
                 self.orig_data = loaded['orig_data']
                 self.person_indices = loaded['person_indices']
+                self.sequence_cams = loaded['sequence_cams']
                 return
 
         ignored_names = []
@@ -182,7 +185,7 @@ class PoseEstimatorDataset(Dataset):
                                 print(f'Ignoring {c} because it\'s not in the list of cameras to be used while training')
                                 ignored_names.append(c)
                             continue
-                        c_offset = c_index * camera_section_length_total
+                        c_offset = c_index * self.camera_section_length_total
                         skeleton = json.loads(data[c][0])
                         if not skeleton:
                             continue
@@ -198,7 +201,7 @@ class PoseEstimatorDataset(Dataset):
 
                         if c in parameters.used_cameras:
                             used_c_index = parameters.used_cameras.index(c)
-                            used_c_offset = used_c_index * camera_section_length_input
+                            used_c_offset = used_c_index * self.camera_section_length_input
 
                             cam_from_root = torch.matmul(camera_i_transforms[c_index], torch.tensor([0.0, 0.0, 0.0, 1.0]))  # world to camera transformation matrix, results_3d)
                             for j, values in skeleton.items():
@@ -224,20 +227,12 @@ class PoseEstimatorDataset(Dataset):
 
                     if view_from_robot:
                         for c_index in range(len(parameters.used_cameras)):  # Include 3D from triangulation
-                            used_c_offset = c_index * camera_section_length_input
+                            used_c_offset = c_index * self.camera_section_length_input
                             for j in results_3D:
                                 used_j_offset = int(j) * numbers_per_joint
                                 network_input[used_c_offset + used_j_offset + 10] = 1. # 3D is available
                                 network_input[used_c_offset + used_j_offset + 11: used_c_offset + used_j_offset + 14] = torch.tensor(np.transpose(results_3D[j])[0]) / 10.
 
-                        # for combination in permutations_generator_random(flags, self.data_augmentation, MAX_COMBINATIONS_NUMBER):
-                        #     network_input_DA = copy.deepcopy(network_input)
-                        #     for c_index, part in enumerate(combination):
-                        #         c_offset = c_index * camera_section_length_input
-                        #         if part == 0:
-                        #             for j in parameters.joint_list:
-                        #                 j_offset = int(j) * numbers_per_joint
-                        #                 network_input_DA[c_offset + j_offset: c_offset + j_offset + 10] = 0.
                         self.data.append(network_input)
                         self.orig_data.append(error_input)
                         self.available_cams.append(flags)
@@ -249,35 +244,59 @@ class PoseEstimatorDataset(Dataset):
                             print('Loaded', n_loaded, 'of', n_data)
 
 
-                current_seq_data = []
-                current_seq_orig = []
-                current_seq_cams = []
+                # current_seq_data = []
+                # current_seq_orig = []
+                # current_seq_cams = []
 
-                for data_index, element in enumerate(self.data):
-                    current_seq_data.append(element)
-                    current_seq_orig.append(self.orig_data[data_index])
-                    current_seq_cams.append(self.available_cams[data_index])
+                for data_index, _ in enumerate(self.data):
 
-                    if len(current_seq_data) == sequence_length:
-                        for comb_seq in sequence_permutations_generator_random(current_seq_cams, self.data_augmentation, MAX_COMBINATIONS_NUMBER):
-                            seq_DA = copy.deepcopy(current_seq_data)
-                            for i, combination in enumerate(comb_seq):
-                                for c_index, part in enumerate(combination):
-                                    c_offset = c_index * camera_section_length_input
-                                    if part == 0:
-                                        for j in parameters.joint_list:
-                                            j_offset = int(j) * numbers_per_joint
-                                            seq_DA[i][c_offset + j_offset: c_offset + j_offset + 10] = 0.
-                            sequences_data.append(torch.stack(seq_DA))
-                            sequences_orig.append(torch.stack(current_seq_orig))
-                            self.person_indices[person_id].append(i_sample)
-                            i_sample += 1
-                            total += 1
+                    current_seq_data = []
+                    current_seq_orig = []
+                    current_seq_cams = []
+
+                    for step in range(self.sequence_length):
+                        index = data_index - step*self.sample_step
+                        if index < 0:
+                            current_seq_data.append(torch.zeros([skeleton_length_input]))
+                            current_seq_orig.append(torch.zeros([skeleton_length_total]))
+                            current_seq_cams.append([0]*len(parameters.used_cameras))
+                        else:
+                            current_seq_data.append(self.data[index].detach().clone())
+                            current_seq_orig.append(self.orig_data[index].detach().clone())
+                            current_seq_cams.append(self.available_cams[data_index])
+
+                    sequences_data.append(torch.stack(current_seq_data))
+                    sequences_orig.append(torch.stack(current_seq_orig))
+                    self.sequence_cams.append(copy.deepcopy(current_seq_cams))
+                    self.person_indices[person_id].append(i_sample)
+                    i_sample += 1
+                    total += 1
+
+                    # current_seq_data.append(element)
+                    # current_seq_orig.append(self.orig_data[data_index])
+                    # current_seq_cams.append(self.available_cams[data_index])
+
+                    # if len(current_seq_data) == sequence_length:
+                    #     # for comb_seq in sequence_permutations_generator_random(current_seq_cams, self.data_augmentation, MAX_COMBINATIONS_NUMBER):
+                    #     #     seq_DA = copy.deepcopy(current_seq_data)
+                    #     #     for i, combination in enumerate(comb_seq):
+                    #     #         for c_index, part in enumerate(combination):
+                    #     #             c_offset = c_index * self.camera_section_length_input
+                    #     #             if part == 0:
+                    #     #                 for j in parameters.joint_list:
+                    #     #                     j_offset = int(j) * numbers_per_joint
+                    #     #                     seq_DA[i][c_offset + j_offset: c_offset + j_offset + 10] = 0.
+                    #     sequences_data.append(torch.stack(current_seq_data))
+                    #     sequences_orig.append(torch.stack(current_seq_orig))
+                    #     self.sequence_cams.append(copy.deepcopy(current_seq_cams))
+                    #     self.person_indices[person_id].append(i_sample)
+                    #     i_sample += 1
+                    #     total += 1
                             
-                        for _ in range(int(round((sequence_length/35), 0))):
-                            current_seq_data.pop(0)
-                            current_seq_orig.pop(0)
-                            current_seq_cams.pop(0)
+                    #     for _ in range(int(round((sequence_length/35), 0))):
+                    #         current_seq_data.pop(0)
+                    #         current_seq_orig.pop(0)
+                    #         current_seq_cams.pop(0)
 
                 self.data = []
                 self.orig_data = []
@@ -287,60 +306,67 @@ class PoseEstimatorDataset(Dataset):
                 #     break
 
             print(f'Given {given}\nTotal {total}')
-        elif type(input_data) is list and type(input_data[0]) is dict:
-            current_seq_data = []
-            if len(input_data)<sequence_length:
-                current_seq_data = [torch.zeros([skeleton_length_input])]*(sequence_length-len(input_data))
-            for frame in input_data:
-                skeleton_indices = get_skeleton_indices(frame)
-                results_3D = get_3D_from_triangulation(frame, skeleton_indices)
-                output = torch.zeros([skeleton_length_input])
-                for c in frame:
-                    if c in parameters.used_cameras:
-                        c_index = parameters.camera_names.index(c)
-                        used_c_index = parameters.used_cameras.index(c)
-                        used_c_offset = used_c_index * camera_section_length_input
+        elif type(input_data) is list and type(input_data[0]) is dict: ## for testing. Single sequence
+            # current_seq_data = []
+            # if len(input_data)<sequence_length:
+            #     current_seq_data = [torch.zeros([skeleton_length_input])]*(sequence_length-len(input_data))
+            data_index = len(input_data) - 1
+            # for frame in input_data:
+            for step in range(self.sequence_length):
+                index = data_index - step*self.sample_step
+                if index < 0:
+                    current_seq_data.append(torch.zeros([skeleton_length_input]))
+                else:
+                    frame = input_data[index]
+                    skeleton_indices = get_skeleton_indices(frame)
+                    results_3D = get_3D_from_triangulation(frame, skeleton_indices)
+                    output = torch.zeros([skeleton_length_input])
+                    for c in frame:
+                        if c in parameters.used_cameras:
+                            c_index = parameters.camera_names.index(c)
+                            used_c_index = parameters.used_cameras.index(c)
+                            used_c_offset = used_c_index * self.camera_section_length_input
 
-                        cam_from_root = torch.matmul(camera_i_transforms[c_index], torch.tensor([0.0, 0.0, 0.0, 1.0])) / 10.  # world to camera transformation matrix, results_3d)                
-                        skeleton = json.loads(frame[c][0])
-                        if not skeleton:
-                            continue
-                        skeleton = skeleton[skeleton_indices[c]]
+                            cam_from_root = torch.matmul(camera_i_transforms[c_index], torch.tensor([0.0, 0.0, 0.0, 1.0])) / 10.  # world to camera transformation matrix, results_3d)                
+                            skeleton = json.loads(frame[c][0])
+                            if not skeleton:
+                                continue
+                            skeleton = skeleton[skeleton_indices[c]]
 
-                        point_list = []
-                        for j, values in skeleton.items():
-                            if j == "ID": continue
-                            point_list.append([values[1], values[2]])
-                        if point_list:
-                            point_list = np.array(point_list)
-                            norm_factors = np.array([[image_width/2, image_height/2]]*point_list.shape[0])
-                            normalize_points = (point_list-norm_factors)/norm_factors                    
-                            undistorted_point_list = cv2.undistortPoints(point_list, camera_matrices[c], distortion_coefficients[c]).squeeze(axis=1)
-                            undistorted_pix_ray_list = torch.from_numpy(undistorted_point_list).type(torch.float32)
-                            new_col = torch.tensor([[1.0, 0.0]]*point_list.shape[0])
-                            pix_ray_from_root_list = torch.matmul(camera_i_transforms[c_index], torch.cat((undistorted_pix_ray_list, new_col), dim=1).transpose(dim0=1, dim1=0))/10. #perform only rotation
-                            pix_ray_from_root_list = pix_ray_from_root_list.transpose(dim0=1, dim1=0)
+                            point_list = []
+                            for j, values in skeleton.items():
+                                if j == "ID": continue
+                                point_list.append([values[1], values[2]])
+                            if point_list:
+                                point_list = np.array(point_list)
+                                norm_factors = np.array([[image_width/2, image_height/2]]*point_list.shape[0])
+                                normalize_points = (point_list-norm_factors)/norm_factors                    
+                                undistorted_point_list = cv2.undistortPoints(point_list, camera_matrices[c], distortion_coefficients[c]).squeeze(axis=1)
+                                undistorted_pix_ray_list = torch.from_numpy(undistorted_point_list).type(torch.float32)
+                                new_col = torch.tensor([[1.0, 0.0]]*point_list.shape[0])
+                                pix_ray_from_root_list = torch.matmul(camera_i_transforms[c_index], torch.cat((undistorted_pix_ray_list, new_col), dim=1).transpose(dim0=1, dim1=0))/10. #perform only rotation
+                                pix_ray_from_root_list = pix_ray_from_root_list.transpose(dim0=1, dim1=0)
 
-                        i_point = 0
-                        for j, values in skeleton.items():
-                            if j == "ID": continue
+                            i_point = 0
+                            for j, values in skeleton.items():
+                                if j == "ID": continue
+                                j_offset = int(j) * numbers_per_joint
+                                output[used_c_offset + j_offset] = values[3]
+                                output[used_c_offset + j_offset + 1] = normalize_points[i_point][0] #(values[1] - image_width/2) / (image_width/2) 
+                                output[used_c_offset + j_offset + 2] = normalize_points[i_point][1] #(values[2] - image_height/2) / (image_height/2)
+                                output[used_c_offset + j_offset + 3] = values[4]
+
+                                output[used_c_offset + j_offset + 4: used_c_offset + j_offset + 7] = cam_from_root[0:3]
+                                output[used_c_offset + j_offset + 7: used_c_offset + j_offset + 10] = pix_ray_from_root_list[i_point][0:3] #pix_ray_from_root[0:3] / 10.
+                                i_point += 1
+
+                    for c_index in range(len(parameters.used_cameras)):  # Include 3D from triangulation
+                        used_c_offset = c_index * self.camera_section_length_input
+                        for j in results_3D:
                             j_offset = int(j) * numbers_per_joint
-                            output[used_c_offset + j_offset] = values[3]
-                            output[used_c_offset + j_offset + 1] = normalize_points[i_point][0] #(values[1] - image_width/2) / (image_width/2) 
-                            output[used_c_offset + j_offset + 2] = normalize_points[i_point][1] #(values[2] - image_height/2) / (image_height/2)
-                            output[used_c_offset + j_offset + 3] = values[4]
-
-                            output[used_c_offset + j_offset + 4: used_c_offset + j_offset + 7] = cam_from_root[0:3]
-                            output[used_c_offset + j_offset + 7: used_c_offset + j_offset + 10] = pix_ray_from_root_list[i_point][0:3] #pix_ray_from_root[0:3] / 10.
-                            i_point += 1
-
-                for c_index in range(len(parameters.used_cameras)):  # Include 3D from triangulation
-                    used_c_offset = c_index * camera_section_length_input
-                    for j in results_3D:
-                        j_offset = int(j) * numbers_per_joint
-                        output[used_c_offset + j_offset + 10] = 1. # 3D is available
-                        output[used_c_offset + j_offset + 11: used_c_offset + j_offset + 14] = torch.tensor(np.transpose(results_3D[j])[0]) / 10.
-                current_seq_data.append(output)
+                            output[used_c_offset + j_offset + 10] = 1. # 3D is available
+                            output[used_c_offset + j_offset + 11: used_c_offset + j_offset + 14] = torch.tensor(np.transpose(results_3D[j])[0]) / 10.
+                    current_seq_data.append(output)
 
             # if torch.sum(torch.abs(current_seq_data)) > 1:
             sequences_data.append(torch.stack(current_seq_data))
@@ -384,7 +410,8 @@ class PoseEstimatorDataset(Dataset):
              torch.save({
                 'data': self.data,
                 'orig_data': self.orig_data,
-                'person_indices': self.person_indices
+                'person_indices': self.person_indices,
+                'sequence_cams': self.sequence_cams
                 }, f'{input_data[-1]}.pytorch')
 
     def __len__(self):
@@ -393,6 +420,18 @@ class PoseEstimatorDataset(Dataset):
     def __getitem__(self, idx):
         ret1 = self.data[idx]
         ret2 = self.orig_data[idx]
+
+        if self.data_augmentation:
+            ret1 = self.data[idx].detach().clone()         
+            comb_seq = sequence_permutations_generator_random(self.sequence_cams[idx])
+            for i, combination in enumerate(comb_seq):
+                for c_index, part in enumerate(combination):
+                    c_offset = c_index * self.camera_section_length_input
+                    if part == 0 and self.sequence_cams[idx][c_index] == 1:
+                        for j in parameters.joint_list:
+                            j_offset = int(j) * numbers_per_joint
+                            ret1[i][c_offset + j_offset: c_offset + j_offset + 10] = 0.
+
 
         if self.transform:
             ret1 = self.transform(ret1)
@@ -433,3 +472,8 @@ class PersonBatchSampler(Sampler):
 
     def __len__(self):
         return len(self.data_len)
+    
+
+if __name__ == '__main__':
+    files = sys.argv[1:]
+    dataset = PoseEstimatorDataset(100, files, parameters.cameras, parameters.joint_list, data_augmentation=True, reload=True, save=False)

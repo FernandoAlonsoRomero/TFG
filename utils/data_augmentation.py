@@ -46,7 +46,7 @@ def permutations_generator_random(available, data_augmentation, max_combinations
     for combination in combinations:
         yield combination
 
-def sequence_permutations_generator_random(available, data_augmentation, max_combinations_number = 1):
+def sequence_permutations_generator_random_on_load(available, data_augmentation, max_combinations_number = 1):
     yield available
 
     if data_augmentation is False:
@@ -54,17 +54,17 @@ def sequence_permutations_generator_random(available, data_augmentation, max_com
 
     seq_cams = []
     for av in available:
-        available_np = np.array(available)
+        available_np = np.array(av)
         seq_cams.append(available_np)
     seq_combinations = []
     n_combinations = max_combinations_number
-    for instant in len(available):
+    for instant in range(len(available)):
         combinations = []
         for combination in itertools.product(range(2), repeat=len(available[0])):
             combination_np = np.array(combination)
-            if (available_np-combination_np < 0).any():
+            if (seq_cams[instant]-combination_np < 0).any():
                 continue
-            if (available_np-combination_np == 0).all() or (combination_np == 0).all():
+            if (seq_cams[instant]-combination_np == 0).all() or (combination_np == 0).all():
                 continue
             combinations.append(combination)
         random.shuffle(combinations)
@@ -77,6 +77,23 @@ def sequence_permutations_generator_random(available, data_augmentation, max_com
         comb_seq = [comb[i] for comb in seq_combinations]
         yield comb_seq
 
+def sequence_permutations_generator_random(available):
+    seq_cams = []
+    total_cams = len(available[0])
+    for av in available:
+        cam_indices = [i for i in range(total_cams) if av[i]==1]
+        n_cams = len(cam_indices)
+        random.shuffle(cam_indices)
+        if n_cams > 1:
+            new_n_cams = random.randint(2, n_cams)
+        else:
+            new_n_cams = n_cams
+        new_cams = [0]*total_cams
+        for i in cam_indices[:new_n_cams]:
+            new_cams[i] = 1
+        seq_cams.append(new_cams)
+
+    return seq_cams
 
 def add_data_to_json(json_data, min_number_of_views = 1):
     new_json_data = []

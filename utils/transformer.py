@@ -32,7 +32,12 @@ class TransformerPoseEstimation(nn.Module):
 		self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
 		
 		# Proyección final para las coordenadas en 3D
-		self.output_proj = nn.Linear(d_model, output_dim)
+		self.output_proj = nn.Sequential(
+			nn.Linear(d_model, 256),
+			nn.LeakyReLU(negative_slope = 0.1),
+			nn.Linear(256, 128),
+			nn.LeakyReLU(negative_slope = 0.1),
+			nn.Linear(128, output_dim))
 		
 		# Normalización y Dropout
 		self.dropout = nn.Dropout(dropout)
@@ -66,7 +71,7 @@ class TransformerPoseEstimation(nn.Module):
 		x = x.transpose(0, 1)
 		
 		# Quitar la dimensión de secuencia
-		x = x.squeeze(1)
+		x = x[:,-1, :].squeeze(1)
 		
 		# Proyectar las salidas del transformer a las coordenadas 3D
 		x = self.output_proj(x)  # (batch_size, output_dim) -> (batch_size, 54)
