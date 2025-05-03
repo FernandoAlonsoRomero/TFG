@@ -317,7 +317,7 @@ class Visualizer(object):
             ##########################################
             ## La salida debe ser dividida entre 10 ##
             ##########################################
-            results_3d = torch.squeeze(output_all[person_id])
+            results_3d = torch.squeeze(output_all[person_id])/10.
             results_3d = results_3d.to('cpu')
 
             x3D = results_3d[self.axes_3D['X'][0]::3]*self.axes_3D['X'][1]
