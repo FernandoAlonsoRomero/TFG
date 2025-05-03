@@ -29,7 +29,7 @@ parser = argparse.ArgumentParser(description='Print accuracy and time metrics of
 parser.add_argument('--testfiles', type=str, nargs='+', required=True, help='List of json files used as input')
 parser.add_argument('--tmdir', type=str, nargs=1,required=True, help='Directory that contains the files with the transfomation matrices')
 parser.add_argument('--modelsdir', type=str, nargs='?', required=False, default='../data/models/transformer/', help='Directory that contains the models\' files')
-parser.add_argument('--datastep', type=int, nargs='?', required=False, default=12, help='Data step used to compute the metrics')
+parser.add_argument('--datastep', type=int, nargs='?', required=False, default=10, help='Data step used to compute the metrics')
 
 
 args = parser.parse_args()
@@ -94,7 +94,7 @@ in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_j
 print(f'in_dim  {in_dimensions}')
 saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
 sequence_length = saved['sequence_length']
-sample_step = 10 #saved['sample_step']
+sample_step = 1 #saved['sample_step']
 
 transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
                                     d_model=512, nhead=8, num_encoder_layers=6).to(device)
@@ -275,8 +275,6 @@ for file in TEST_FILES:
                 if id_person not in people_sequences.keys():
                     people_sequences[id_person] = []
                 people_sequences[id_person].append(raw_input)
-                # if len(people_sequences[id_person])>sequence_length:
-                #     people_sequences[id_person].pop(0)
                 inputs = PoseEstimatorDataset(sequence_length, sample_step, people_sequences[id_person], parameters.cameras, parameters.joint_list, save=False)
                 if inputs.__len__()==0:
                     continue
@@ -284,6 +282,9 @@ for file in TEST_FILES:
                 person_visible_joints.append(visible_joints)
                 
                 inputs = inputs[0][0].reshape([1, sequence_length, -1]).to(device)
+                # if len(people_sequences[id_person])>100:
+                #     print(inputs)
+                    
 
                 batched_input.append(inputs)       
 
@@ -300,6 +301,10 @@ for file in TEST_FILES:
                     ##########################################
                     results_3d = torch.squeeze(output_all[person_id])/10.
                     results_3d = results_3d.to('cpu')
+                    # if len(people_sequences[id_person])>100:
+                    #     print(len(people_sequences[0]))
+                    #     print(results_3d)
+                    #     exit()
 
                     x3D = results_3d[::3] 
                     y3D = results_3d[1::3]
@@ -332,7 +337,7 @@ for file in TEST_FILES:
                         if idx in parameters.used_joints:
                             p3D = final_results[iR][idx]
                             err = np.linalg.norm(p3D - gt3D)
-                            print(p3D, '-', gt3D)
+                            # print(p3D, '-', gt3D)
                             mean_error += err
                             n_joints += 1
 

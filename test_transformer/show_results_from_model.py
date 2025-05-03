@@ -126,16 +126,11 @@ class Visualizer(object):
 
         saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
         self.sequence_length = saved['sequence_length']
-        self. sample_step = 10 #saved['sample_step']
+        self. sample_step = 1 #saved['sample_step']
         in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint
         self.transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
                                     d_model=512, nhead=8, num_encoder_layers=6).to(device)
-
-        # self.transformer = TransformerPoseEstimation(input_dim=len(parameters.used_cameras)*len(parameters.joint_list)*numbers_per_joint,
-        #                                      output_dim=54)
-        # saved = torch.load(MODELSDIR + 'pose_estimator.pytorch', map_location=device)
-        # self.transformer.load_state_dict(saved['model_state_dict'])
-        # self.transformer = self.transformer.to(device)
+        self.transformer.load_state_dict(saved['model_state_dict'])
         
         # Instantiate the skeleton matching model
         if len(parameters.used_cameras)>1:
@@ -309,6 +304,10 @@ class Visualizer(object):
             inputs = inputs[0][0].reshape([1, self.sequence_length, -1]).to(device)
             batched_input.append(inputs)       
 
+            # if len(self.person_sequences)>100:
+            #     print(inputs)
+
+
         # GET the 3D skeleton of all the detected persons
         input_all = torch.cat(batched_input, dim=0)
         output_all = self.transformer(input_all.to(device))
@@ -319,6 +318,10 @@ class Visualizer(object):
             ##########################################
             results_3d = torch.squeeze(output_all[person_id])/10.
             results_3d = results_3d.to('cpu')
+            # if len(self.person_sequences)>100:
+            #     print(len(batched_input), len(self.person_sequences))
+            #     print(results_3d)
+            #     exit()
 
             x3D = results_3d[self.axes_3D['X'][0]::3]*self.axes_3D['X'][1]
             y3D = results_3d[self.axes_3D['Y'][0]::3]*self.axes_3D['Y'][1]
