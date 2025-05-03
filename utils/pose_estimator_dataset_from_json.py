@@ -254,7 +254,7 @@ class PoseEstimatorDataset(Dataset):
                     current_seq_orig = []
                     current_seq_cams = []
 
-                    for step in range(self.sequence_length):
+                    for step in range(self.sequence_length-1, -1, -1):
                         index = data_index - step*self.sample_step
                         if index < 0:
                             current_seq_data.append(torch.zeros([skeleton_length_input]))
@@ -263,7 +263,7 @@ class PoseEstimatorDataset(Dataset):
                         else:
                             current_seq_data.append(self.data[index].detach().clone())
                             current_seq_orig.append(self.orig_data[index].detach().clone())
-                            current_seq_cams.append(self.available_cams[data_index])
+                            current_seq_cams.append(self.available_cams[index])
 
                     sequences_data.append(torch.stack(current_seq_data))
                     sequences_orig.append(torch.stack(current_seq_orig))
@@ -307,12 +307,12 @@ class PoseEstimatorDataset(Dataset):
 
             print(f'Given {given}\nTotal {total}')
         elif type(input_data) is list and type(input_data[0]) is dict: ## for testing. Single sequence
-            # current_seq_data = []
+            current_seq_data = []
             # if len(input_data)<sequence_length:
             #     current_seq_data = [torch.zeros([skeleton_length_input])]*(sequence_length-len(input_data))
             data_index = len(input_data) - 1
             # for frame in input_data:
-            for step in range(self.sequence_length):
+            for step in range(self.sequence_length-1, -1, -1):
                 index = data_index - step*self.sample_step
                 if index < 0:
                     current_seq_data.append(torch.zeros([skeleton_length_input]))
@@ -476,4 +476,4 @@ class PersonBatchSampler(Sampler):
 
 if __name__ == '__main__':
     files = sys.argv[1:]
-    dataset = PoseEstimatorDataset(100, files, parameters.cameras, parameters.joint_list, data_augmentation=True, reload=True, save=False)
+    dataset = PoseEstimatorDataset(10, 10, files, parameters.cameras, parameters.joint_list, data_augmentation=True, reload=True, save=False)

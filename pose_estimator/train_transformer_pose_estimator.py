@@ -3,7 +3,7 @@ from tkinter import Y
 
 epochs = 100000
 lr = 1e-4
-batch_size = 128 #1048
+batch_size = 256 #1048
 patience = 20
 optimise_matrices = False
 sequence_length = 10
@@ -377,7 +377,8 @@ if __name__ == '__main__':
                         'average_validation_loss': val_loss_data,
                         'average_training_error_per_coord': mae_per_coord,
                         'average_validation_error_per_coord': val_mae_per_coord,
-                        'sequence_length': sequence_length
+                        'sequence_length': sequence_length,
+                        'sample_step': sample_step
                         }, f'../transf_pose_estimator.pytorch')
                 cur_step = 0
                 write_json(training_results, "../transf_training_results.json")

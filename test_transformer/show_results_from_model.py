@@ -115,16 +115,27 @@ class Visualizer(object):
         self.input_data = []
         for json_file in json_files:
             self.input_data += json.load(open(json_file, 'rb'))
+
+        # self.the_whole_dataset = PoseEstimatorDataset(self.sequence_length, self.sample_step, [json_files[0]], parameters.cameras, parameters.joint_list, save=False)            
         self.itert = 0
+        self.person_sequences = []
 
     def init_models(self):
         # Instantiate the transformer
         numbers_per_joint = parameters.numbers_per_joint
-        self.transformer = TransformerPoseEstimation(input_dim=len(parameters.used_cameras)*len(parameters.joint_list)*numbers_per_joint,
-                                             output_dim=54)
-        saved = torch.load(MODELSDIR + 'pose_estimator.pytorch', map_location=device)
-        self.transformer.load_state_dict(saved['model_state_dict'])
-        self.transformer = self.transformer.to(device)
+
+        saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
+        self.sequence_length = saved['sequence_length']
+        self. sample_step = 10 #saved['sample_step']
+        in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint
+        self.transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
+                                    d_model=512, nhead=8, num_encoder_layers=6).to(device)
+
+        # self.transformer = TransformerPoseEstimation(input_dim=len(parameters.used_cameras)*len(parameters.joint_list)*numbers_per_joint,
+        #                                      output_dim=54)
+        # saved = torch.load(MODELSDIR + 'pose_estimator.pytorch', map_location=device)
+        # self.transformer.load_state_dict(saved['model_state_dict'])
+        # self.transformer = self.transformer.to(device)
         
         # Instantiate the skeleton matching model
         if len(parameters.used_cameras)>1:
@@ -291,8 +302,11 @@ class Visualizer(object):
             if not raw_input:
                 continue
 
-            inputs = PoseEstimatorDataset(raw_input, parameters.cameras, parameters.joint_list, save=False)
-            inputs = inputs[0][0].reshape([1, inputs[0][0].size()[0]]).to(device)
+            self.person_sequences.append(raw_input)
+            # inputs = self.the_whole_dataset[self.itert][0].reshape([1, self.sequence_length, -1]).to(device)
+
+            inputs = PoseEstimatorDataset(self.sequence_length, self.sample_step, self.person_sequences, parameters.cameras, parameters.joint_list, save=False)
+            inputs = inputs[0][0].reshape([1, self.sequence_length, -1]).to(device)
             batched_input.append(inputs)       
 
         # GET the 3D skeleton of all the detected persons
@@ -303,7 +317,7 @@ class Visualizer(object):
             ##########################################
             ## La salida debe ser dividida entre 10 ##
             ##########################################
-            results_3d = torch.squeeze(output_all[person_id])/10
+            results_3d = torch.squeeze(output_all[person_id])
             results_3d = results_3d.to('cpu')
 
             x3D = results_3d[self.axes_3D['X'][0]::3]*self.axes_3D['X'][1]

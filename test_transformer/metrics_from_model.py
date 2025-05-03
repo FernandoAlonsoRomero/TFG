@@ -61,7 +61,6 @@ for cam_idx, cam in enumerate(parameters.camera_names):
 
 
 CLASSIFICATION_THRESHOLD = 0.5
-sequence_length = 100
 
 ########################################
 
@@ -93,12 +92,15 @@ numbers_per_joint = parameters.numbers_per_joint
 
 in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint
 print(f'in_dim  {in_dimensions}')
+saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
+sequence_length = saved['sequence_length']
+sample_step = 10 #saved['sample_step']
+
 transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
                                     d_model=512, nhead=8, num_encoder_layers=6).to(device)
-
-saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
 transformer.load_state_dict(saved['model_state_dict'])
 transformer = transformer.to(device)
+
 
 params = pickle.load(open(MODELSDIR + 'skeleton_matching.prms', 'rb'))
 model = GAT(None, params['gnn_layers'], params['num_feats'], params['n_classes'], params['num_hidden'], params['heads'],
@@ -111,9 +113,8 @@ model = model.to(device)
 total_data = 0
 n_input = 0
 
-people_sequences = dict()
-
 for file in TEST_FILES:
+    people_sequences = dict()    
     print(file)
     dataset_name = file.split('/')[-1]
     tm_file = tm_dir + 'tm_' + dataset_name.split('_')[0] + '_' + dataset_name.split('_')[1] + '.pickle'
@@ -274,14 +275,14 @@ for file in TEST_FILES:
                 if id_person not in people_sequences.keys():
                     people_sequences[id_person] = []
                 people_sequences[id_person].append(raw_input)
-                if len(people_sequences[id_person])>sequence_length:
-                    people_sequences[id_person].pop(0)
-                inputs = PoseEstimatorDataset(sequence_length, people_sequences[id_person], parameters.cameras, parameters.joint_list, save=False)
+                # if len(people_sequences[id_person])>sequence_length:
+                #     people_sequences[id_person].pop(0)
+                inputs = PoseEstimatorDataset(sequence_length, sample_step, people_sequences[id_person], parameters.cameras, parameters.joint_list, save=False)
                 if inputs.__len__()==0:
                     continue
 
                 person_visible_joints.append(visible_joints)
-
+                
                 inputs = inputs[0][0].reshape([1, sequence_length, -1]).to(device)
 
                 batched_input.append(inputs)       
@@ -291,13 +292,14 @@ for file in TEST_FILES:
             if batched_input:
                 input_all = torch.cat(batched_input, dim=0)
                 output_all = transformer(input_all.to(device))
+                
                 # print('output', output_all.shape)
                 for person_id in range(output_all.shape[0]):
                     ##########################################
                     ## La salida debe ser dividida entre 10 ##
                     ##########################################
                     results_3d = torch.squeeze(output_all[person_id])/10.
-                    results_3d = results_3d[-1].to('cpu')
+                    results_3d = results_3d.to('cpu')
 
                     x3D = results_3d[::3] 
                     y3D = results_3d[1::3]
@@ -330,6 +332,7 @@ for file in TEST_FILES:
                         if idx in parameters.used_joints:
                             p3D = final_results[iR][idx]
                             err = np.linalg.norm(p3D - gt3D)
+                            print(p3D, '-', gt3D)
                             mean_error += err
                             n_joints += 1
 
