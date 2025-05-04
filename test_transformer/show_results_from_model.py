@@ -316,7 +316,7 @@ class Visualizer(object):
             ##########################################
             ## La salida debe ser dividida entre 10 ##
             ##########################################
-            results_3d = torch.squeeze(output_all[person_id])/10.
+            results_3d = torch.squeeze(output_all[person_id,-1,:])/10.
             results_3d = results_3d.to('cpu')
             # if len(self.person_sequences)>100:
             #     print(len(batched_input), len(self.person_sequences))

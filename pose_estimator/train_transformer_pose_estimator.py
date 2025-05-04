@@ -318,12 +318,12 @@ if __name__ == '__main__':
             # Perform optimization
             optimizer.step()
             # Set current loss
-            batch_loss += (loss.item()-loss_bones.item())*this_batch_size
+            batch_loss += (loss.item()-loss_bones.item())*this_batch_size*sequence_length
             batch_bones_loss += loss_bones.item()*this_batch_size
 
-        loss_data = batch_loss / len(train_dataset)
+        loss_data = batch_loss / len(train_dataset) /sequence_length
         bones_loss_data = batch_bones_loss / len(train_dataset)
-        mae_per_coord = math.sqrt(loss_data) / sequence_length / len(parameters.cameras) / len(joint_list) / 2
+        mae_per_coord = math.sqrt(loss_data) / len(parameters.cameras) / len(joint_list) / 2
         print(f'loss: {loss_data:.5f}, bones loss: {bones_loss_data:.5f}, error per coor: {mae_per_coord:.5f}')
 
         if loss_data < min_train_loss:
@@ -353,12 +353,12 @@ if __name__ == '__main__':
                     loss_bones = loss_function(bones_error, target_bones)
                     loss += loss_bones
 
-                    valid_batch_loss += (loss.item()-loss_bones.item()) * this_batch_size
+                    valid_batch_loss += (loss.item()-loss_bones.item()) * this_batch_size *sequence_length
                     valid_batch_bones_loss += loss_bones.item()*this_batch_size
 
-            val_loss_data = valid_batch_loss / len(valid_dataset)
+            val_loss_data = valid_batch_loss / len(valid_dataset) / sequence_length
             val_bones_loss_data = valid_batch_bones_loss / len(valid_dataset)
-            val_mae_per_coord = math.sqrt(val_loss_data) / sequence_length / len(parameters.cameras) / len(joint_list) / 2
+            val_mae_per_coord = math.sqrt(val_loss_data) / len(parameters.cameras) / len(joint_list) / 2
 
             training_results[epoch] = {
                 "Error" : mae_per_coord,
