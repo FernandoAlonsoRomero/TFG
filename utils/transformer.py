@@ -70,8 +70,8 @@ class TransformerPoseEstimation(nn.Module):
 		# Volver a transponer para obtener la forma original: (batch_size, 1, d_model)
 		x = x.transpose(0, 1)
 		
-		# Quitar la dimensión de secuencia
-		x = x[:,-1, :].squeeze(1)
+		# # Quitar la dimensión de secuencia
+		# x = x[:,-1, :].squeeze(1)
 		
 		# Proyectar las salidas del transformer a las coordenadas 3D
 		x = self.output_proj(x)  # (batch_size, output_dim) -> (batch_size, 54)

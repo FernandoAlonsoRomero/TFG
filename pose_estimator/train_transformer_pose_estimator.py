@@ -88,22 +88,25 @@ with open("../human_pose.json", 'r') as f:
 
 def compute_bones_lenght_error(outputs, joints, skeleton):
     results3D = []
+    # print(outputs.shape)
 
+    
     for joint_idx in range(len(joints)):
-        results3D.append(outputs[:, joint_idx*3:joint_idx*3+3])
+        results3D.append(outputs[:, :, joint_idx*3:joint_idx*3+3])
 
     bones = []
     for bone_idx in range(len(skeleton)):
         j1 = skeleton[bone_idx][0]-1
         j2 = skeleton[bone_idx][1]-1
         bone = results3D[j1]-results3D[j2]
-        bones.append(torch.norm(bone, dim=1))
+        # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
+        bones.append(torch.norm(bone, dim=2))
+        # print(bones[-1].shape)
 
-
-    error = 0.0
+    error = torch.zeros(outputs.shape[0], device = device)
     for b in bones:
-        error += torch.pow(torch.std(b), 2)
-
+        std = torch.pow(torch.std(b, dim=1), 2)
+        error += std
 
     return error
     
@@ -115,15 +118,15 @@ def compute_error(seq_length, parameters, joints, raw_inputs, orig_inputs, outpu
     ## Aplano la salida de la red y el input original   ##
     ## para facilitar el calculo del error              ##
     ######################################################
-    # outputs = outputs.view(-1, outputs.shape[-1])
-    # orig_inputs = orig_inputs.view(-1, orig_inputs.shape[-1])
+    outputs = outputs.view(-1, outputs.shape[-1])
+    orig_inputs = orig_inputs.view(-1, orig_inputs.shape[-1])
 
-    orig_inputs = orig_inputs[:,-1,:].squeeze()
+    # orig_inputs = orig_inputs[:,-1,:].squeeze()
     ######################################################
     ## Añado el mismo shape al error                    ##
     ######################################################
-    ones = torch.ones(1, batch_size, device=device)  # useful to convert to homogeneous coordinates
-    error2D = torch.zeros(batch_size, device=device)  # we'll add up the 2D error for the batch in this variable
+    ones = torch.ones(1, batch_size*seq_length, device=device)  # useful to convert to homogeneous coordinates
+    error2D = torch.zeros(batch_size*seq_length, device=device)  # we'll add up the 2D error for the batch in this variable
 
     for joint_idx in range(len(joints)):
         ######################################################
@@ -304,7 +307,9 @@ if __name__ == '__main__':
             # Compute loss
             target = torch.zeros(error.size(), device=device)  # We aim for zero error
             loss = loss_function(error, target)
-            loss += bones_error
+            target_bones = torch.zeros(bones_error.size(), device=device)  # We aim for zero error
+            loss_bones = loss_function(bones_error, target_bones)
+            loss += loss_bones
 
             # Perform backward pass
             loss.backward()
@@ -313,12 +318,12 @@ if __name__ == '__main__':
             # Perform optimization
             optimizer.step()
             # Set current loss
-            batch_loss += (loss.item()-bones_error.item())*this_batch_size
-            batch_bones_loss += bones_error.item()*this_batch_size
+            batch_loss += (loss.item()-loss_bones.item())*this_batch_size
+            batch_bones_loss += loss_bones.item()*this_batch_size
 
         loss_data = batch_loss / len(train_dataset)
         bones_loss_data = batch_bones_loss / len(train_dataset)
-        mae_per_coord = math.sqrt(loss_data) / len(parameters.cameras) / len(joint_list) / 2
+        mae_per_coord = math.sqrt(loss_data) / sequence_length / len(parameters.cameras) / len(joint_list) / 2
         print(f'loss: {loss_data:.5f}, bones loss: {bones_loss_data:.5f}, error per coor: {mae_per_coord:.5f}')
 
         if loss_data < min_train_loss:
@@ -344,13 +349,16 @@ if __name__ == '__main__':
                     # Compute loss
                     target = torch.zeros(error.size(), device=device)  # We aim for zero error
                     loss = loss_function(error, target)
-                    loss += bones_error
-                    valid_batch_loss += (loss.item()-bones_error.item()) * this_batch_size
-                    valid_batch_bones_loss += bones_error.item()*this_batch_size
+                    target_bones = torch.zeros(bones_error.size(), device=device) 
+                    loss_bones = loss_function(bones_error, target_bones)
+                    loss += loss_bones
+
+                    valid_batch_loss += (loss.item()-loss_bones.item()) * this_batch_size
+                    valid_batch_bones_loss += loss_bones.item()*this_batch_size
 
             val_loss_data = valid_batch_loss / len(valid_dataset)
             val_bones_loss_data = valid_batch_bones_loss / len(valid_dataset)
-            val_mae_per_coord = math.sqrt(val_loss_data) / len(parameters.cameras) / len(joint_list) / 2
+            val_mae_per_coord = math.sqrt(val_loss_data) / sequence_length / len(parameters.cameras) / len(joint_list) / 2
 
             training_results[epoch] = {
                 "Error" : mae_per_coord,
@@ -359,7 +367,7 @@ if __name__ == '__main__':
                 "Val_Loss" : val_loss_data
             }
 
-            mean_val_loss = val_loss_data
+            mean_val_loss = loss
             print(f'val_loss: {val_loss_data:.6f} val_bones_loss: {val_bones_loss_data:.6f}')
             print(" val_MEAN: {:.6f} val_BEST: {:.6f} | val_MAE/coord {:.6f}".format(mean_val_loss, best_loss, val_mae_per_coord))
 
