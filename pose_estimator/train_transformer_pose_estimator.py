@@ -45,13 +45,17 @@ parser = argparse.ArgumentParser(description='3D skeleton prediction training fo
 
 parser.add_argument('--trainset', type=str, nargs='+', required=False, help='List of json files composing the training set')
 parser.add_argument('--devset', type=str, nargs='+', required=False, help='List of json files composing the development set')
+parser.add_argument('--savedir', type=str, nargs='?', required=True, help='Directory where the model will be saved')
+parser.add_argument('--use_bones_error', action='store_true', help='Use bones error for training')
+parser.add_argument('--use_batch_in_bones_error', action='store_true', help='Use the whole batch to compute the bones error')
 
 args = parser.parse_args()
 
+CUDA_DEVICE = 'cuda'
 
 print(torch.cuda.is_available())
 if torch.cuda.is_available():
-    device = torch.device('cuda')
+    device = torch.device(CUDA_DEVICE)
     print('Using CUDA')
 else:
     device = torch.device('cpu')
@@ -60,6 +64,10 @@ else:
 
 TRAIN_FILES = args.trainset
 DEV_FILES = args.devset
+SAVE_DIR = args.savedir
+
+if not os.path.exists(SAVE_DIR):
+    os.makedirs(SAVE_DIR)
 
 # TRAIN_FILES = [
 #     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/train_set.json"
@@ -86,13 +94,18 @@ with open("../human_pose.json", 'r') as f:
     human_pose = json.load(f)
     skeleton = human_pose["skeleton"]
 
-def compute_bones_lenght_error(outputs, joints, skeleton):
+def compute_bones_lenght_error(outputs, joints, skeleton, use_batch = False):
     results3D = []
     # print(outputs.shape)
 
-    
-    for joint_idx in range(len(joints)):
-        results3D.append(outputs[:, :, joint_idx*3:joint_idx*3+3])
+    if not use_batch:
+        for joint_idx in range(len(joints)):
+            results3D.append(outputs[:, :, joint_idx*3:joint_idx*3+3])
+    else:
+        outputs = outputs.view(-1, outputs.shape[-1])
+        for joint_idx in range(len(joints)):
+            results3D.append(outputs[:, joint_idx*3:joint_idx*3+3])
+
 
     bones = []
     for bone_idx in range(len(skeleton)):
@@ -100,12 +113,13 @@ def compute_bones_lenght_error(outputs, joints, skeleton):
         j2 = skeleton[bone_idx][1]-1
         bone = results3D[j1]-results3D[j2]
         # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
-        bones.append(torch.norm(bone, dim=2))
+        bones.append(torch.norm(bone, dim=-1))
         # print(bones[-1].shape)
 
+    std_dim = 0 if use_batch else 1
     error = torch.zeros(outputs.shape[0], device = device)
     for b in bones:
-        std = torch.pow(torch.std(b, dim=1), 2)
+        std = torch.pow(torch.std(b, dim=std_dim), 2)
         error += std
 
     return error
@@ -195,6 +209,9 @@ if __name__ == '__main__':
     global stop_training
     global ctrl_c_counter
 
+    use_bones_error = args.use_bones_error
+    use_batch_in_bones_error = args.use_batch_in_bones_error
+
     stop_training = False
     ctrl_c_counter = 0
 
@@ -224,8 +241,8 @@ if __name__ == '__main__':
         # Add the inverse transform (camera to root) to the list
         camera_i_transforms.append(Variable(torch.from_numpy(trfm_i).type(torch.float32).to(device), requires_grad=optimise_matrices))
         # Add the camera matrix to the list
-        camera_matrices.append(Variable(camera_matrix(cam), requires_grad=optimise_matrices))
-        distortion_coefficients.append(Variable(get_distortion_coefficients(cam), requires_grad=optimise_matrices))
+        camera_matrices.append(Variable(camera_matrix(cam, cuda_device = CUDA_DEVICE), requires_grad=optimise_matrices))
+        distortion_coefficients.append(Variable(get_distortion_coefficients(cam, cuda_device = CUDA_DEVICE), requires_grad=optimise_matrices))
 
     # Instantiate the Transformer
     in_dimensions = number_of_cameras*len(joint_list)*numbers_per_joint
@@ -303,12 +320,19 @@ if __name__ == '__main__':
             error = compute_error(sequence_length, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                     camera_d_transforms, camera_matrices, distortion_coefficients)
 
-            bones_error = compute_bones_lenght_error(outputs, joint_list, skeleton)*this_batch_size
             # Compute loss
             target = torch.zeros(error.size(), device=device)  # We aim for zero error
             loss = loss_function(error, target)
-            target_bones = torch.zeros(bones_error.size(), device=device)  # We aim for zero error
-            loss_bones = loss_function(bones_error, target_bones)
+            if use_bones_error:
+                bones_error = compute_bones_lenght_error(outputs, joint_list, skeleton, use_batch_in_bones_error)
+                target_bones = torch.zeros(bones_error.size(), device=device)  # We aim for zero error
+                loss_bones = loss_function(bones_error, target_bones)
+                if use_batch_in_bones_error:
+                    loss_bones = loss_bones*this_batch_size*sequence_length
+                else:
+                    loss_bones = loss_bones*sequence_length
+            else:
+                loss_bones = torch.tensor(0)
             loss += loss_bones
 
             # Perform backward pass
@@ -345,12 +369,19 @@ if __name__ == '__main__':
 
                     error = compute_error(sequence_length, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                             camera_d_transforms, camera_matrices, distortion_coefficients)
-                    bones_error = compute_bones_lenght_error(outputs, joint_list, skeleton)*this_batch_size
                     # Compute loss
                     target = torch.zeros(error.size(), device=device)  # We aim for zero error
                     loss = loss_function(error, target)
-                    target_bones = torch.zeros(bones_error.size(), device=device) 
-                    loss_bones = loss_function(bones_error, target_bones)
+                    if use_bones_error:
+                        bones_error = compute_bones_lenght_error(outputs, joint_list, skeleton, use_batch_in_bones_error)
+                        target_bones = torch.zeros(bones_error.size(), device=device)  # We aim for zero error
+                        loss_bones = loss_function(bones_error, target_bones)
+                        if use_batch_in_bones_error:
+                            loss_bones = loss_bones*this_batch_size*sequence_length
+                        else:
+                            loss_bones = loss_bones*sequence_length
+                    else:
+                        loss_bones = torch.tensor(0)
                     loss += loss_bones
 
                     valid_batch_loss += (loss.item()-loss_bones.item()) * this_batch_size *sequence_length
@@ -367,7 +398,7 @@ if __name__ == '__main__':
                 "Val_Loss" : val_loss_data
             }
 
-            mean_val_loss = loss
+            mean_val_loss = val_loss_data+val_bones_loss_data
             print(f'val_loss: {val_loss_data:.6f} val_bones_loss: {val_bones_loss_data:.6f}')
             print(" val_MEAN: {:.6f} val_BEST: {:.6f} | val_MAE/coord {:.6f}".format(mean_val_loss, best_loss, val_mae_per_coord))
 
@@ -387,9 +418,9 @@ if __name__ == '__main__':
                         'average_validation_error_per_coord': val_mae_per_coord,
                         'sequence_length': sequence_length,
                         'sample_step': sample_step
-                        }, f'../transf_pose_estimator.pytorch')
+                        }, os.path.join(SAVE_DIR, 'transf_pose_estimator.pytorch'))
                 cur_step = 0
-                write_json(training_results, "../transf_training_results.json")
+                write_json(training_results, os.path.join(SAVE_DIR,"transf_training_results.json"))
             else:
                 cur_step += 1
                 if cur_step >= patience:

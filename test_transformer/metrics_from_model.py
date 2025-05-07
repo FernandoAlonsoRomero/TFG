@@ -299,7 +299,7 @@ for file in TEST_FILES:
                     ##########################################
                     ## La salida debe ser dividida entre 10 ##
                     ##########################################
-                    results_3d = torch.squeeze(output_all[person_id])/10.
+                    results_3d = torch.squeeze(output_all[person_id][-1])/10.
                     results_3d = results_3d.to('cpu')
                     # if len(people_sequences[id_person])>100:
                     #     print(len(people_sequences[0]))

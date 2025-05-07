@@ -9,19 +9,19 @@ sys.path.append('../')
 from parameters import parameters
 
 if torch.cuda.is_available() is True:
-    device = torch.device('cuda')
+    device = torch.device('cuda:1')
 else:
     device = torch.device('cpu')
 
 
-def camera_matrix(cam_idx, use_cuda=True):
+def camera_matrix(cam_idx, use_cuda=True, cuda_device = 'cuda'):
     fx = parameters.fx[cam_idx]
     fy = parameters.fy[cam_idx]
     cx = parameters.cx[cam_idx]
     cy = parameters.cy[cam_idx]
 
     if torch.cuda.is_available() is True and use_cuda is True:
-        device = torch.device('cuda')
+        device = torch.device(cuda_device)
     else:
         device = torch.device('cpu')
 
@@ -36,9 +36,9 @@ def from_homogeneous2(v):
     return (v/v[-1])
 
 
-def get_distortion_coefficients(cam_idx):
+def get_distortion_coefficients(cam_idx, cuda_device = 'cuda'):
     kd = [parameters.kd0[cam_idx], parameters.kd1[cam_idx], parameters.kd2[cam_idx]]
-    return torch.tensor(kd, device = device)
+    return torch.tensor(kd, device = cuda_device)
 
 
 def apply_distortion(kd, v):
