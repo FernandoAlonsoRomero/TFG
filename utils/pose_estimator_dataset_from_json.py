@@ -143,7 +143,7 @@ class PoseEstimatorDataset(Dataset):
 
 
         if reload is True:
-            reload_fname = f'{input_data[-1]}.pytorch'
+            reload_fname = f'{input_data[-1]}_{self.sequence_length}_{self.sample_step}.pytorch'
             if os.path.exists(reload_fname):
                 loaded = torch.load(reload_fname)
                 self.data = loaded['data']
@@ -412,7 +412,7 @@ class PoseEstimatorDataset(Dataset):
                 'orig_data': self.orig_data,
                 'person_indices': self.person_indices,
                 'sequence_cams': self.sequence_cams
-                }, f'{input_data[-1]}.pytorch')
+                }, f'{input_data[-1]}_{self.sequence_length}_{self.sample_step}.pytorch')
 
     def __len__(self):
         return self.data.shape[0]

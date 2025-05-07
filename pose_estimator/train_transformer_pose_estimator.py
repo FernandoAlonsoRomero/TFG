@@ -6,8 +6,6 @@ lr = 1e-4
 batch_size = 256 #1048
 patience = 20
 optimise_matrices = False
-sequence_length = 10
-sample_step = 10
 
 WHOLE_DATASET_IN_GPU = False
 
@@ -48,6 +46,8 @@ parser.add_argument('--devset', type=str, nargs='+', required=False, help='List 
 parser.add_argument('--savedir', type=str, nargs='?', required=True, help='Directory where the model will be saved')
 parser.add_argument('--use_bones_error', action='store_true', help='Use bones error for training')
 parser.add_argument('--use_batch_in_bones_error', action='store_true', help='Use the whole batch to compute the bones error')
+parser.add_argument('--seqlen', type=int, nargs='?', required=False, default=10, help='Sequences length')
+parser.add_argument('--samplestep', type=int, nargs='?', required=False, default=10, help='Sample step')
 
 args = parser.parse_args()
 
@@ -68,6 +68,9 @@ SAVE_DIR = args.savedir
 
 if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
+
+sequence_length = args.seqlen
+sample_step = args.samplestep
 
 # TRAIN_FILES = [
 #     #"/home/fernando/Desktop/TFG/data/datasets/arp_lab/training/pose_estimator/train_set.json"
