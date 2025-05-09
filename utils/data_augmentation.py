@@ -131,3 +131,20 @@ def add_data_to_json(json_data, min_number_of_views = 1):
                     json_index += 1
 
     return new_json_data
+
+if __name__ == '__main__':
+    n_cams = 5
+    seqlen = 5
+    available = []
+    for s in range(seqlen):
+        av = []
+        for c in range(n_cams):
+            av.append(1) #random.randint(0, 1))
+        available.append(av)
+    print(available)
+    comb_seq = sequence_permutations_generator_random(available)
+    print(comb_seq)
+    comb_seq = sequence_permutations_generator_random(available)
+    print(comb_seq)
+    comb_seq = sequence_permutations_generator_random(available)
+    print(comb_seq)

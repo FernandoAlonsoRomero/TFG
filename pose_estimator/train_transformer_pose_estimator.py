@@ -48,10 +48,14 @@ parser.add_argument('--use_bones_error', action='store_true', help='Use bones er
 parser.add_argument('--use_batch_in_bones_error', action='store_true', help='Use the whole batch to compute the bones error')
 parser.add_argument('--seqlen', type=int, nargs='?', required=False, default=10, help='Sequences length')
 parser.add_argument('--samplestep', type=int, nargs='?', required=False, default=10, help='Sample step')
+parser.add_argument('--bones_error_weight', type=int, nargs='?', required=False, default=1, help='Bones error weight')
+parser.add_argument('--cuda_device', type=str, nargs='?', required=False, default='cuda', help='Cuda device')
+parser.add_argument('--data_augmentation', action='store_true', help='Use data augmentation during training')
+parser.add_argument('--same_person_in_batch', action='store_true', help='Create batches from data of the same person')
 
 args = parser.parse_args()
 
-CUDA_DEVICE = 'cuda'
+CUDA_DEVICE = args.cuda_device
 
 print(torch.cuda.is_available())
 if torch.cuda.is_available():
@@ -214,6 +218,10 @@ if __name__ == '__main__':
 
     use_bones_error = args.use_bones_error
     use_batch_in_bones_error = args.use_batch_in_bones_error
+    bones_error_weight = args.bones_error_weight
+    data_augmentation = args.data_augmentation
+    same_person_in_batch = args.same_person_in_batch
+
 
     stop_training = False
     ctrl_c_counter = 0
@@ -270,12 +278,17 @@ if __name__ == '__main__':
     ##############################################################
     ## Añadimos el tamaño de la sequencia, en este caso 5       ##
     ##############################################################
-    train_dataset = PoseEstimatorDataset(sequence_length, sample_step, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
-    valid_dataset = PoseEstimatorDataset(sequence_length, sample_step, DEV_FILES, parameters.cameras, joint_list, data_augmentation=True, reload=True, save=True)
-    train_sampler = PersonBatchSampler(train_dataset.person_indices, batch_size)
-    valid_sampler = PersonBatchSampler(valid_dataset.person_indices, batch_size)
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_sampler = train_sampler)
-    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_sampler = valid_sampler)
+    train_dataset = PoseEstimatorDataset(sequence_length, sample_step, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True)
+    valid_dataset = PoseEstimatorDataset(sequence_length, sample_step, DEV_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True)
+    if same_person_in_batch:
+        train_sampler = PersonBatchSampler(train_dataset.person_indices, batch_size)
+        valid_sampler = PersonBatchSampler(valid_dataset.person_indices, batch_size)
+        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_sampler = train_sampler)
+        valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_sampler = valid_sampler)
+    else:
+        train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size = batch_size, shuffle = True)
+        valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size = batch_size, shuffle = True)
+
     print(f'dataset length: {len(train_dataset)}')
 
     # Define loss function and optimizer
@@ -336,6 +349,8 @@ if __name__ == '__main__':
                     loss_bones = loss_bones*sequence_length
             else:
                 loss_bones = torch.tensor(0)
+
+            loss_bones = loss_bones*bones_error_weight
             loss += loss_bones
 
             # Perform backward pass
@@ -385,6 +400,7 @@ if __name__ == '__main__':
                             loss_bones = loss_bones*sequence_length
                     else:
                         loss_bones = torch.tensor(0)
+                    loss_bones = loss_bones*bones_error_weight
                     loss += loss_bones
 
                     valid_batch_loss += (loss.item()-loss_bones.item()) * this_batch_size *sequence_length

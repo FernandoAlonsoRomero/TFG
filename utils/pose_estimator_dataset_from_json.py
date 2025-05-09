@@ -427,7 +427,7 @@ class PoseEstimatorDataset(Dataset):
             for i, combination in enumerate(comb_seq):
                 for c_index, part in enumerate(combination):
                     c_offset = c_index * self.camera_section_length_input
-                    if part == 0 and self.sequence_cams[idx][c_index] == 1:
+                    if part == 0 and self.sequence_cams[idx][i][c_index] == 1:
                         for j in parameters.joint_list:
                             j_offset = int(j) * numbers_per_joint
                             ret1[i][c_offset + j_offset: c_offset + j_offset + 10] = 0.
@@ -477,3 +477,5 @@ class PersonBatchSampler(Sampler):
 if __name__ == '__main__':
     files = sys.argv[1:]
     dataset = PoseEstimatorDataset(10, 10, files, parameters.cameras, parameters.joint_list, data_augmentation=True, reload=True, save=False)
+    item1, item2 = dataset[100]
+    print(item1)

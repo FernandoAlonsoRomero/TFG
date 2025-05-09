@@ -84,6 +84,34 @@ time_3D = 0.
 time_3D_person = 0.
 DATASTEP = args.datastep
 
+with open("../human_pose.json", 'r') as f:
+    human_pose = json.load(f)
+    bones_definition = human_pose["skeleton"]
+
+def compute_bones_lenght_error(results, skeleton):
+    
+    results3D = torch.tensor(np.array(results)) #instant, joint, 3D
+    results3D = results3D.transpose(0,1) #joint, instant, 3D
+    # print('results3D shape', results3D.shape)
+    bones = []
+    for bone_idx in range(len(skeleton)):
+        j1 = skeleton[bone_idx][0]-1
+        j2 = skeleton[bone_idx][1]-1
+        bone = results3D[j1]-results3D[j2]
+        # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
+        bones.append(torch.norm(bone, dim=-1))
+        # print(bones[-1].shape)
+
+    # print(bones)
+
+    error = []
+    for i, b in enumerate(bones):
+        std = torch.std(b)
+        error.append(std)
+    final_error = np.mean(np.array(error))
+    return final_error
+
+
 #######################################
 
 numbers_per_joint = parameters.numbers_per_joint
@@ -94,7 +122,18 @@ in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_j
 print(f'in_dim  {in_dimensions}')
 saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
 sequence_length = saved['sequence_length']
-sample_step = 1 #saved['sample_step']
+sample_step = saved['sample_step']
+
+potential_steps = [v for v in range(1, sample_step+1) if sample_step%v==0]
+new_sample_step = 1
+mindiff = np.inf
+DATASTEP = args.datastep
+for s in potential_steps:
+    if abs(DATASTEP-s)<mindiff:
+        mindiff = abs(DATASTEP-s)
+        new_sample_step = s
+DATASTEP = new_sample_step
+sample_step = int(sample_step/DATASTEP)
 
 transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
                                     d_model=512, nhead=8, num_encoder_layers=6).to(device)
@@ -115,6 +154,7 @@ n_input = 0
 
 for file in TEST_FILES:
     people_sequences = dict()    
+    all_estimations = []
     print(file)
     dataset_name = file.split('/')[-1]
     tm_file = tm_dir + 'tm_' + dataset_name.split('_')[0] + '_' + dataset_name.split('_')[1] + '.pickle'
@@ -301,10 +341,8 @@ for file in TEST_FILES:
                     ##########################################
                     results_3d = torch.squeeze(output_all[person_id][-1])/10.
                     results_3d = results_3d.to('cpu')
-                    # if len(people_sequences[id_person])>100:
-                    #     print(len(people_sequences[0]))
-                    #     print(results_3d)
-                    #     exit()
+                    new_estimation = results_3d.reshape(-1, 3)
+                    all_estimations.append(new_estimation)
 
                     x3D = results_3d[::3] 
                     y3D = results_3d[1::3]
@@ -414,3 +452,6 @@ if n_data > 0:
     print('Mean time for graph matching (per person)', time_graph_matching_person / n_data)
     print('Mean time for 3D', time_3D / n_data)
     print('Mean time for 3D (per person)', time_3D_person / n_data)
+
+bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
+print('Mean bones error', bones_error)

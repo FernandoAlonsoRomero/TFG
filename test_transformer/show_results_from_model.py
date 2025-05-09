@@ -25,7 +25,7 @@ parser.add_argument('--showgt', action='store_true', help='Show ground truth')
 parser.add_argument('--tmfile', type=str, nargs=1, help='Directory that contains the files with the transfomation matrices')
 parser.add_argument('--modelsdir', type=str, nargs='?', required=False, default='../data/models/transformer/', help='Directory that contains the models\' files')
 parser.add_argument('--plotperiod', type=int, nargs='?', required=False, default=0, help='Plot period (miliseconds)')
-parser.add_argument('--datastep', type=int, nargs='?', required=False, default=10, help='Data step used to plot the results')
+parser.add_argument('--datastep', type=int, nargs='?', required=False, default=5, help='Data step used to plot the results')
 
 args = parser.parse_args()
 
@@ -126,7 +126,22 @@ class Visualizer(object):
 
         saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
         self.sequence_length = saved['sequence_length']
-        self. sample_step = 1 #saved['sample_step']
+        self.sample_step = saved['sample_step']
+
+        potential_steps = [v for v in range(1, self.sample_step+1) if self.sample_step%v==0]
+        new_sample_step = 1
+        mindiff = np.inf
+        self.DATASTEP = args.datastep
+        print(self.DATASTEP)
+        for s in potential_steps:
+            if abs(self.DATASTEP-s)<mindiff:
+                mindiff = abs(self.DATASTEP-s)
+                new_sample_step = s
+        self.DATASTEP = new_sample_step
+        self.sample_step = int(self.sample_step/self.DATASTEP)
+        print(self.DATASTEP)
+
+
         in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint
         self.transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
                                     d_model=512, nhead=8, num_encoder_layers=6).to(device)
@@ -148,7 +163,7 @@ class Visualizer(object):
         if self.itert >= len(self.input_data):
             exit()
 
-        if self.itert%DATASTEP!=0:
+        if self.itert%self.DATASTEP!=0:
             return
 
         input_element = self.input_data[self.itert]
