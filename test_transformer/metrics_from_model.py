@@ -105,11 +105,14 @@ def compute_bones_lenght_error(results, skeleton):
     # print(bones)
 
     error = []
+    max_error = []
     for i, b in enumerate(bones):
-        std = torch.std(b)
+        std, mean = torch.std_mean(b)
         error.append(std)
+        max_error.append(torch.max(torch.abs(b-mean)))
     final_error = np.mean(np.array(error))
-    return final_error
+    final_max_error = np.max(np.array(max_error))
+    return final_error, final_max_error
 
 
 #######################################
@@ -453,5 +456,6 @@ if n_data > 0:
     print('Mean time for 3D', time_3D / n_data)
     print('Mean time for 3D (per person)', time_3D_person / n_data)
 
-bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
+bones_error, max_bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
 print('Mean bones error', bones_error)
+print('Max bones error', max_bones_error)

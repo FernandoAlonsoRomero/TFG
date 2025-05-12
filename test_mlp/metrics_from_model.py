@@ -15,7 +15,7 @@ from graph_generator import MergedMultipleHumansDataset, HumanGraphFromView
 
 
 sys.path.append('../utils')
-from pose_estimator_dataset_from_json import PoseEstimatorDataset
+from pose_estimator_dataset_from_json_MLP import PoseEstimatorDataset
 from mlp import PoseEstimatorMLP
 from skeleton_matching_utils import get_person_proposal_from_network_output
 
@@ -85,6 +85,39 @@ time_3D = 0.
 time_3D_person = 0.
 DATASTEP = args.datastep
 
+
+with open("../human_pose.json", 'r') as f:
+    human_pose = json.load(f)
+    bones_definition = human_pose["skeleton"]
+
+def compute_bones_lenght_error(results, skeleton):
+    
+    results3D = torch.tensor(np.array(results)) #instant, joint, 3D
+    results3D = results3D.transpose(0,1) #joint, instant, 3D
+    # print('results3D shape', results3D.shape)
+    bones = []
+    for bone_idx in range(len(skeleton)):
+        j1 = skeleton[bone_idx][0]-1
+        j2 = skeleton[bone_idx][1]-1
+        bone = results3D[j1]-results3D[j2]
+        # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
+        bones.append(torch.norm(bone, dim=-1))
+        # print(bones[-1].shape)
+
+    # print(bones)
+
+    error = []
+    max_error = []
+    for i, b in enumerate(bones):
+        std, mean = torch.std_mean(b)
+        error.append(std)
+        max_error.append(torch.max(torch.abs(b-mean)))
+    final_error = np.mean(np.array(error))
+    final_max_error = np.max(np.array(max_error))
+    return final_error, final_max_error
+
+
+
 #######################################
 
 numbers_per_joint = parameters.numbers_per_joint
@@ -105,6 +138,7 @@ total_data = 0
 n_input = 0
 
 for file in TEST_FILES:
+    all_estimations = []
     print(file)
     dataset_name = file.split('/')[-1]
     tm_file = tm_dir + 'tm_' + dataset_name.split('_')[0] + '_' + dataset_name.split('_')[1] + '.pickle'
@@ -281,6 +315,8 @@ for file in TEST_FILES:
                 for person_id in range(output_all.shape[0]):
                     results_3d = torch.squeeze(output_all[person_id])*10.
                     results_3d = results_3d.to('cpu')
+                    new_estimation = results_3d.reshape(-1, 3)
+                    all_estimations.append(new_estimation)
 
                     x3D = results_3d[::3] 
                     y3D = results_3d[1::3]
@@ -388,3 +424,7 @@ if n_data > 0:
     print('Mean time for graph matching (per person)', time_graph_matching_person / n_data)
     print('Mean time for 3D', time_3D / n_data)
     print('Mean time for 3D (per person)', time_3D_person / n_data)
+
+bones_error, max_bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
+print('Mean bones error', bones_error)
+print('Max bones error', max_bones_error)
