@@ -5,6 +5,7 @@ import json
 import copy
 import numpy as np
 import argparse
+import time
 
 sys.path.append('../skeleton_matching')
 from gat2 import GAT2 as GAT
@@ -26,6 +27,9 @@ parser.add_argument('--tmfile', type=str, nargs=1, help='Directory that contains
 parser.add_argument('--modelsdir', type=str, nargs='?', required=False, default='../data/models/transformer/', help='Directory that contains the models\' files')
 parser.add_argument('--plotperiod', type=int, nargs='?', required=False, default=0, help='Plot period (miliseconds)')
 parser.add_argument('--datastep', type=int, nargs='?', required=False, default=5, help='Data step used to plot the results')
+parser.add_argument('--video', type=str, nargs='?', required=False, default='', help='Save the video in the specified file')
+parser.add_argument('--azimuth', type=int, nargs='?', required=False, default=0, help='Azimuth of the camera (in degrees)')
+parser.add_argument('--elevation', type=int, nargs='?', required=False, default=0, help='Elevation of the camera (in degrees)')
 
 args = parser.parse_args()
 
@@ -60,6 +64,7 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 import pyqtgraph.opengl as gl
 import pyqtgraph as pg
 import numpy as np
+import cv2
 
 SHOW_GT = args.showgt
 
@@ -74,6 +79,24 @@ if SHOW_GT:
         trfm_dataset = tm_dataset.get_transform("root", parameters.camera_names[cam_idx])
         dataset_camera_d_transforms.append(torch.from_numpy(trfm_dataset).type(torch.float32))
 
+def QImageToNumpy(incomingImage):
+    '''  Converts a QImage into an opencv MAT format  '''
+
+    incomingImage = incomingImage.convertToFormat(QtGui.QImage.Format.Format_RGB888)
+
+    width = incomingImage.width()
+    height = incomingImage.height()
+    print(width, height)
+
+    # arr = np.ndarray((height, width, 3), buffer=incomingImage.constBits(), strides=[incomingImage.bytesPerLine(), 3, 1], dtype=np.uint8)
+
+    print(incomingImage.bytesPerLine())
+    ptr = incomingImage.constBits()
+    print(type(ptr))
+    ptr.setsize(height * width * 3)
+    # arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 3))
+    arr = np.ndarray((height, width, 3), buffer=ptr, strides=[incomingImage.bytesPerLine(), 3, 1], dtype=np.uint8)
+    return arr
 
 class Visualizer(object):
     def __init__(self, period, json_files):
@@ -84,6 +107,7 @@ class Visualizer(object):
         self.w.setBackgroundColor((255, 255, 255, 255))
         self.w.setWindowTitle('3D Multi-pose estimator')
         self.w.setGeometry(0, 110, 1080, 1080)
+        # self.w.setFixedSize(640, 640)
         self.w.show()
 
         # create the background grids
@@ -104,6 +128,8 @@ class Visualizer(object):
         gz.setSize(10, 10, 0)
         self.w.addItem(gz)
 
+        self.w.orbit(args.azimuth, args.elevation)
+
         self.period = period
         self.plotPoints = None
         self.plotLines = None
@@ -118,7 +144,13 @@ class Visualizer(object):
 
         # self.the_whole_dataset = PoseEstimatorDataset(self.sequence_length, self.sample_step, [json_files[0]], parameters.cameras, parameters.joint_list, save=False)            
         self.itert = 0
-        self.person_sequences = []
+        self.people_sequences = dict()
+        self.images4video = []
+        if args.video == '':
+            self.create_video = False
+        else:
+            self.create_video = True
+            self.video_file = args.video
 
     def init_models(self):
         # Instantiate the transformer
@@ -127,6 +159,19 @@ class Visualizer(object):
         saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=device)
         self.sequence_length = saved['sequence_length']
         self.sample_step = saved['sample_step']
+        if 'd_model' in saved.keys():
+            D_MODEL = saved['d_model']
+        else:
+            D_MODEL = 512
+        if 'nhead' in saved.keys():
+            NHEAD = saved['nhead']
+        else:
+            NHEAD = 8
+        if 'num_encoder_layers' in saved.keys():
+            NUM_ENCODER_LAYERS = saved['num_encoder_layers']
+        else:
+            NUM_ENCODER_LAYERS = 6
+
 
         potential_steps = [v for v in range(1, self.sample_step+1) if self.sample_step%v==0]
         new_sample_step = 1
@@ -144,7 +189,7 @@ class Visualizer(object):
 
         in_dimensions = len(parameters.cameras)*len(parameters.joint_list)*numbers_per_joint
         self.transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
-                                    d_model=512, nhead=8, num_encoder_layers=6).to(device)
+                                    d_model=D_MODEL, nhead=NHEAD, num_encoder_layers=NUM_ENCODER_LAYERS).to(device)
         self.transformer.load_state_dict(saved['model_state_dict'])
         
         # Instantiate the skeleton matching model
@@ -161,6 +206,18 @@ class Visualizer(object):
     def process_data(self):
         self.itert += 1
         if self.itert >= len(self.input_data):
+            if self.create_video:
+                file_name_split = self.video_file.split('.')
+                if len(file_name_split)>1:
+                    video_file = '.'.join(file_name_split[:-1])
+                else:
+                    video_file = self.video_file
+                fps = 5
+                fourcc =  cv2.VideoWriter_fourcc('m','p','4','v') # mp4
+                writer = cv2.VideoWriter(video_file+'.mp4', fourcc, fps, (self.images4video[0].shape[1], self.images4video[0].shape[0])) 
+                for image in self.images4video:
+                    writer.write(image)
+                writer.release()
             exit()
 
         if self.itert%self.DATASTEP!=0:
@@ -184,6 +241,7 @@ class Visualizer(object):
 
             if len(scenario.graphs)==0:
                 print('empty scenario')
+                self.people_sequences = dict()
                 return
 
             subgraph = scenario.graphs[0].to(device)
@@ -310,12 +368,15 @@ class Visualizer(object):
                     all_joints_data = json.loads(raw_input[cam][0])
 
             if not raw_input:
+                print("NO INPUT. frame", self.itert)
                 continue
 
-            self.person_sequences.append(raw_input)
+            if person_id not in self.people_sequences.keys():
+                self.people_sequences[person_id] = []
+            self.people_sequences[person_id].append(raw_input)
             # inputs = self.the_whole_dataset[self.itert][0].reshape([1, self.sequence_length, -1]).to(device)
 
-            inputs = PoseEstimatorDataset(self.sequence_length, self.sample_step, self.person_sequences, parameters.cameras, parameters.joint_list, save=False)
+            inputs = PoseEstimatorDataset(self.sequence_length, self.sample_step, self.people_sequences[person_id], parameters.cameras, parameters.joint_list, save=False)
             inputs = inputs[0][0].reshape([1, self.sequence_length, -1]).to(device)
             batched_input.append(inputs)       
 
@@ -401,6 +462,10 @@ class Visualizer(object):
             self.plotLines[i] = gl.GLLinePlotItem(pos=line, color=pg.glColor(
                 color_list[lines_pid[i]]), width=3, antialias=True)
             self.w.addItem(self.plotLines[i])
+
+        if self.create_video:            
+            self.w.grabFramebuffer().save('pr.png')
+            self.images4video.append(cv2.imread('pr.png'))
 
 
     def animation(self):

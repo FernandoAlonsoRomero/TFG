@@ -91,18 +91,21 @@ with open("../human_pose.json", 'r') as f:
     bones_definition = human_pose["skeleton"]
 
 def compute_bones_lenght_error(results, skeleton):
-    
+
+    print(type(results), len(results), type(results[0]), results[0].shape)    
     results3D = torch.tensor(np.array(results)) #instant, joint, 3D
+    print(results3D.shape)
     results3D = results3D.transpose(0,1) #joint, instant, 3D
     # print('results3D shape', results3D.shape)
     bones = []
     for bone_idx in range(len(skeleton)):
-        j1 = skeleton[bone_idx][0]-1
-        j2 = skeleton[bone_idx][1]-1
-        bone = results3D[j1]-results3D[j2]
-        # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
-        bones.append(torch.norm(bone, dim=-1))
-        # print(bones[-1].shape)
+        if skeleton[bone_idx][0]-1 in parameters.used_joints and skeleton[bone_idx][1]-1 in parameters.used_joints:
+            j1 = skeleton[bone_idx][0]-1
+            j2 = skeleton[bone_idx][1]-1
+            bone = results3D[j1]-results3D[j2]
+            # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
+            bones.append(torch.norm(bone, dim=-1))
+            # print(bones[-1].shape)
 
     # print(bones)
 
@@ -139,6 +142,7 @@ n_input = 0
 
 for file in TEST_FILES:
     all_estimations = []
+    all_GT = []
     print(file)
     dataset_name = file.split('/')[-1]
     tm_file = tm_dir + 'tm_' + dataset_name.split('_')[0] + '_' + dataset_name.split('_')[1] + '.pickle'
@@ -194,11 +198,14 @@ for file in TEST_FILES:
                 from_camera = torch.matmul(TR_dataset, torch.cat((GT_3D_torch, ones), 0))
                 to_world = torch.transpose(torch.matmul(TRi, from_camera)[:-1][:], 0, 1)
 
+                complete3D = True
                 GT_3D_person = {}
                 for j in parameters.joint_list:
                     idx = str(j)
                     if idx in joints_3D:
                         GT_3D_person[idx] = to_world[j].numpy()
+                    else:
+                        complete3D = False
 
 
                 GT_3D.append(copy.deepcopy(GT_3D_person))
@@ -207,6 +214,8 @@ for file in TEST_FILES:
                 else:
                     valid_GT.append(False)
 
+                if complete3D:
+                    all_GT.append(torch.tensor(list(GT_3D_person.values())))
             # INIT OF GRAPH MATCHING
 
             time_ini = time.time()
@@ -400,6 +409,13 @@ for file in TEST_FILES:
                     else:
                         TP[i_th].append(0)
                         FP[i_th].append(1)
+    bones_error, max_bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
+    print('Mean bones error', bones_error)
+    print('Max bones error', max_bones_error)
+    GT_bones_error, GT_max_bones_error = compute_bones_lenght_error(all_GT, bones_definition)
+    print('GT Mean bones error', GT_bones_error)
+    print('GT Max bones error', GT_max_bones_error)
+
 
 for i_th, th in enumerate(mpjpe_threshold):
     TP_np = np.array(TP[i_th])
@@ -425,6 +441,4 @@ if n_data > 0:
     print('Mean time for 3D', time_3D / n_data)
     print('Mean time for 3D (per person)', time_3D_person / n_data)
 
-bones_error, max_bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
-print('Mean bones error', bones_error)
-print('Max bones error', max_bones_error)
+

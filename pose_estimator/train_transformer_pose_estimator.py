@@ -7,7 +7,7 @@ batch_size = 256 #1048
 patience = 20
 optimise_matrices = False
 
-WHOLE_DATASET_IN_GPU = False
+WHOLE_DATASET_IN_GPU = True
 
 import sys
 import torch
@@ -56,6 +56,11 @@ parser.add_argument('--same_person_in_batch', action='store_true', help='Create 
 args = parser.parse_args()
 
 CUDA_DEVICE = args.cuda_device
+
+D_MODEL = 1024
+NHEAD = 8
+NUM_ENCODER_LAYERS = 7
+
 
 print(torch.cuda.is_available())
 if torch.cuda.is_available():
@@ -116,12 +121,13 @@ def compute_bones_lenght_error(outputs, joints, skeleton, use_batch = False):
 
     bones = []
     for bone_idx in range(len(skeleton)):
-        j1 = skeleton[bone_idx][0]-1
-        j2 = skeleton[bone_idx][1]-1
-        bone = results3D[j1]-results3D[j2]
-        # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
-        bones.append(torch.norm(bone, dim=-1))
-        # print(bones[-1].shape)
+        if skeleton[bone_idx][0]-1 in parameters.used_joints and skeleton[bone_idx][1]-1 in parameters.used_joints:        
+            j1 = skeleton[bone_idx][0]-1
+            j2 = skeleton[bone_idx][1]-1
+            bone = results3D[j1]-results3D[j2]
+            # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
+            bones.append(torch.norm(bone, dim=-1))
+            # print(bones[-1].shape)
 
     std_dim = 0 if use_batch else 1
     error = torch.zeros(outputs.shape[0], device = device)
@@ -258,15 +264,15 @@ if __name__ == '__main__':
     # Instantiate the Transformer
     in_dimensions = number_of_cameras*len(joint_list)*numbers_per_joint
     print(f'in_dim  {in_dimensions}')
-    transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(joint_list)*3, 
-                                    d_model=512, nhead=8, num_encoder_layers=6).to(device)
+    model = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(joint_list)*3, 
+                                        d_model=D_MODEL, nhead=NHEAD, num_encoder_layers=NUM_ENCODER_LAYERS).to(device)
     ##############################################################
     ## Debido a la arquitectura de los transformers, es muy     ##
     ## importante inicializar los pesos de la red inicialmente. ##
     ## Esto es debid a que al hacerlo de forma aleatoria, puede ##
     ## generarse inconsistencia en la salida de las capas.      ##
     ##############################################################
-    transformer.apply(init_weights)
+    model.apply(init_weights)
 
     # Load the dataset.
     print("Loading datasets")
@@ -278,8 +284,8 @@ if __name__ == '__main__':
     ##############################################################
     ## Añadimos el tamaño de la sequencia, en este caso 5       ##
     ##############################################################
-    train_dataset = PoseEstimatorDataset(sequence_length, sample_step, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True)
-    valid_dataset = PoseEstimatorDataset(sequence_length, sample_step, DEV_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True)
+    train_dataset = PoseEstimatorDataset(sequence_length, sample_step, TRAIN_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True, device = data_device)
+    valid_dataset = PoseEstimatorDataset(sequence_length, sample_step, DEV_FILES, parameters.cameras, joint_list, data_augmentation=data_augmentation, reload=True, save=True, device = data_device)
     if same_person_in_batch:
         train_sampler = PersonBatchSampler(train_dataset.person_indices, batch_size)
         valid_sampler = PersonBatchSampler(valid_dataset.person_indices, batch_size)
@@ -293,7 +299,7 @@ if __name__ == '__main__':
 
     # Define loss function and optimizer
     loss_function = nn.MSELoss()
-    parameters_to_optimise = [x for x in transformer.parameters()]
+    parameters_to_optimise = [x for x in model.parameters()]
 
     if optimise_matrices:
         parameters_to_optimise += camera_i_transforms+camera_d_transforms + camera_matrices
@@ -311,7 +317,7 @@ if __name__ == '__main__':
         if stop_training:
             break
 
-        transformer.train()
+        model.train()
         batch_loss = 0.0
         batch_bones_loss = 0.0
 
@@ -328,7 +334,7 @@ if __name__ == '__main__':
             #
             # Compute output (forward pass)
             #
-            outputs = transformer(raw_inputs.to(device))
+            outputs = model(raw_inputs.to(device))
 
             #
             # Compute back projections and add up the error
@@ -356,7 +362,7 @@ if __name__ == '__main__':
             # Perform backward pass
             loss.backward()
             # Clip the gradients to avoid NaNs
-            torch.nn.utils.clip_grad_norm(parameters=transformer.parameters(), max_norm=10.0, norm_type=2.0)
+            torch.nn.utils.clip_grad_norm(parameters=model.parameters(), max_norm=10.0, norm_type=2.0)
             # Perform optimization
             optimizer.step()
             # Set current loss
@@ -379,11 +385,11 @@ if __name__ == '__main__':
                 with torch.no_grad():
                     raw_inputs = valid_data[0].to(device)
                     orig_inputs = valid_data[1].to(device)
-                    transformer.eval()
+                    model.eval()
 
                     this_batch_size = raw_inputs.size()[0]
 
-                    outputs = transformer(raw_inputs.to(device))
+                    outputs = model(raw_inputs.to(device))
 
                     error = compute_error(sequence_length, parameters, joint_list, raw_inputs, orig_inputs, outputs, this_batch_size,
                                             camera_d_transforms, camera_matrices, distortion_coefficients)
@@ -429,14 +435,17 @@ if __name__ == '__main__':
                     min_dev_loss = best_loss
                 torch.save({
                         'epoch': epoch,
-                        'model_state_dict': transformer.state_dict(),
+                        'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
                         'average_training_loss': loss_data,
                         'average_validation_loss': val_loss_data,
                         'average_training_error_per_coord': mae_per_coord,
                         'average_validation_error_per_coord': val_mae_per_coord,
                         'sequence_length': sequence_length,
-                        'sample_step': sample_step
+                        'sample_step': sample_step,
+                        'd_model': D_MODEL,
+                        'nhead': NHEAD,
+                        'num_encoder_layers': NUM_ENCODER_LAYERS
                         }, os.path.join(SAVE_DIR, 'transf_pose_estimator.pytorch'))
                 cur_step = 0
                 write_json(training_results, os.path.join(SAVE_DIR,"transf_training_results.json"))

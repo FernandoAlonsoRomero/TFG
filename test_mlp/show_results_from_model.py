@@ -5,6 +5,7 @@ import json
 import copy
 import numpy as np
 import argparse
+import cv2
 
 sys.path.append('../skeleton_matching')
 from gat2 import GAT2 as GAT
@@ -14,7 +15,7 @@ sys.path.append('../')
 from parameters import parameters 
 
 sys.path.append('../utils')
-from pose_estimator_dataset_from_json import PoseEstimatorDataset
+from pose_estimator_dataset_from_json_MLP import PoseEstimatorDataset
 from mlp import PoseEstimatorMLP
 from skeleton_matching_utils import get_person_proposal_from_network_output
 
@@ -26,6 +27,9 @@ parser.add_argument('--tmfile', type=str, nargs=1, help='Directory that contains
 parser.add_argument('--modelsdir', type=str, nargs='?', required=False, default='../data/models/mlp/', help='Directory that contains the models\' files')
 parser.add_argument('--plotperiod', type=int, nargs='?', required=False, default=0, help='Plot period (miliseconds)')
 parser.add_argument('--datastep', type=int, nargs='?', required=False, default=10, help='Data step used to plot the results')
+parser.add_argument('--video', type=str, nargs='?', required=False, default='', help='Save the video in the specified file')
+parser.add_argument('--azimuth', type=int, nargs='?', required=False, default=0, help='Azimuth of the camera (in degrees)')
+parser.add_argument('--elevation', type=int, nargs='?', required=False, default=0, help='Elevation of the camera (in degrees)')
 
 args = parser.parse_args()
 
@@ -104,6 +108,8 @@ class Visualizer(object):
         gz.setSize(10, 10, 0)
         self.w.addItem(gz)
 
+        self.w.orbit(args.azimuth, args.elevation)
+
         self.period = period
         self.plotPoints = None
         self.plotLines = None
@@ -116,6 +122,13 @@ class Visualizer(object):
         for json_file in json_files:
             self.input_data += json.load(open(json_file, 'rb'))
         self.itert = 0
+        self.images4video = []
+        if args.video == '':
+            self.create_video = False
+        else:
+            self.create_video = True
+            self.video_file = args.video
+
 
     def init_models(self):
         # Instantiate the mlp
@@ -139,6 +152,18 @@ class Visualizer(object):
     def process_data(self):
         self.itert += 1
         if self.itert >= len(self.input_data):
+            if self.create_video:
+                file_name_split = self.video_file.split('.')
+                if len(file_name_split)>1:
+                    video_file = '.'.join(file_name_split[:-1])
+                else:
+                    video_file = self.video_file
+                fps = 5
+                fourcc =  cv2.VideoWriter_fourcc('m','p','4','v') # mp4
+                writer = cv2.VideoWriter(video_file+'.mp4', fourcc, fps, (self.images4video[0].shape[1], self.images4video[0].shape[0])) 
+            for image in self.images4video:
+                writer.write(image)
+            writer.release()
             exit()
 
         if self.itert%DATASTEP!=0:
@@ -365,6 +390,11 @@ class Visualizer(object):
             self.plotLines[i] = gl.GLLinePlotItem(pos=line, color=pg.glColor(
                 color_list[lines_pid[i]]), width=3, antialias=True)
             self.w.addItem(self.plotLines[i])
+
+        if self.create_video:        
+            self.w.grabFramebuffer().save('pr.png')
+            self.images4video.append(cv2.imread('pr.png'))
+    
 
 
     def animation(self):

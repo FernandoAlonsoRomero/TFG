@@ -95,12 +95,13 @@ def compute_bones_lenght_error(results, skeleton):
     # print('results3D shape', results3D.shape)
     bones = []
     for bone_idx in range(len(skeleton)):
-        j1 = skeleton[bone_idx][0]-1
-        j2 = skeleton[bone_idx][1]-1
-        bone = results3D[j1]-results3D[j2]
-        # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
-        bones.append(torch.norm(bone, dim=-1))
-        # print(bones[-1].shape)
+        if skeleton[bone_idx][0]-1 in parameters.used_joints and skeleton[bone_idx][1]-1 in parameters.used_joints:
+            j1 = skeleton[bone_idx][0]-1
+            j2 = skeleton[bone_idx][1]-1
+            bone = results3D[j1]-results3D[j2]
+            # print(j1, j2, results3D[j1].shape, results3D[j2].shape)
+            bones.append(torch.norm(bone, dim=-1))
+            # print(bones[-1].shape)
 
     # print(bones)
 
@@ -127,6 +128,19 @@ saved = torch.load(MODELSDIR + 'transf_pose_estimator.pytorch', map_location=dev
 sequence_length = saved['sequence_length']
 sample_step = saved['sample_step']
 
+if 'd_model' in saved.keys():
+    D_MODEL = saved['d_model']
+else:
+    D_MODEL = 512
+if 'nhead' in saved.keys():
+    NHEAD = saved['nhead']
+else:
+    NHEAD = 8
+if 'num_encoder_layers' in saved.keys():
+    NUM_ENCODER_LAYERS = saved['num_encoder_layers']
+else:
+    NUM_ENCODER_LAYERS = 6
+
 potential_steps = [v for v in range(1, sample_step+1) if sample_step%v==0]
 new_sample_step = 1
 mindiff = np.inf
@@ -139,7 +153,7 @@ DATASTEP = new_sample_step
 sample_step = int(sample_step/DATASTEP)
 
 transformer = TransformerPoseEstimation(input_dim=in_dimensions, output_dim=len(parameters.joint_list)*3, 
-                                    d_model=512, nhead=8, num_encoder_layers=6).to(device)
+                                    d_model=D_MODEL, nhead=NHEAD, num_encoder_layers=NUM_ENCODER_LAYERS).to(device)
 transformer.load_state_dict(saved['model_state_dict'])
 transformer = transformer.to(device)
 
@@ -432,6 +446,11 @@ for file in TEST_FILES:
                         TP[i_th].append(0)
                         FP[i_th].append(1)
 
+    bones_error, max_bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
+    print('Mean bones error', bones_error)
+    print('Max bones error', max_bones_error)
+
+
 for i_th, th in enumerate(mpjpe_threshold):
     TP_np = np.array(TP[i_th])
     FP_np = np.array(FP[i_th])
@@ -456,6 +475,3 @@ if n_data > 0:
     print('Mean time for 3D', time_3D / n_data)
     print('Mean time for 3D (per person)', time_3D_person / n_data)
 
-bones_error, max_bones_error = compute_bones_lenght_error(all_estimations, bones_definition)
-print('Mean bones error', bones_error)
-print('Max bones error', max_bones_error)

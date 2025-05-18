@@ -135,12 +135,33 @@ class PoseEstimatorDataset(Dataset):
         self.orig_data = []
         self.person_indices = {}
         self.available_cams = []
+        if device is None:
+            self.device = 'cpu'
+        else:
+            self.device = device
 
         sequences_data = []
         sequences_orig = []
         self.sequence_cams = []
 
+        indices_2D_features = []
+        reset_multipliers = []
+        for c_index in range(len(parameters.used_cameras)):
+            part_indices = []
+            c_offset = c_index * self.camera_section_length_input
+            for j in parameters.joint_list:
+                j_offset = int(j) * numbers_per_joint
+                part_indices.extend(range(c_offset + j_offset, c_offset + j_offset + 10))
+            indices_2D_features.extend(part_indices)
+            reset_multipliers.append(torch.ones(len(part_indices)))
 
+        self.reset_features_len = 10*len(parameters.joint_list)
+        self.indices_2D_features = torch.tensor(indices_2D_features)
+        self.reset_multipliersDA = torch.cat(reset_multipliers)
+        if device is not None:
+            print(device)
+            self.indices_2D_features = self.indices_2D_features.to(device=device)
+            self.reset_multipliersDA = self.reset_multipliersDA.to(device=device)
 
         if reload is True:
             reload_fname = f'{input_data[-1]}_{self.sequence_length}_{self.sample_step}.pytorch'
@@ -422,9 +443,18 @@ class PoseEstimatorDataset(Dataset):
         ret2 = self.orig_data[idx]
 
         if self.data_augmentation:
-            ret1 = self.data[idx].detach().clone()         
+            ret1 = self.data[idx].detach().clone()  
+            ret1 = ret1.to(self.device)       
             comb_seq = sequence_permutations_generator_random(self.sequence_cams[idx])
             for i, combination in enumerate(comb_seq):
+                # multipliers = torch.cat([
+                #     part * self.reset_multipliersDA[c_index * self.reset_features_len : (c_index + 1) * self.reset_features_len]
+                #     for c_index, part in enumerate(combination)
+                # ]).to(self.device)
+
+                # ret1[i, self.indices_2D_features] *= multipliers
+
+
                 for c_index, part in enumerate(combination):
                     c_offset = c_index * self.camera_section_length_input
                     if part == 0 and self.sequence_cams[idx][i][c_index] == 1:
